@@ -1,0 +1,22 @@
+on ready:
+	mark "user id: %discord id of {fixture::user}%"
+	mark "guild id: %discord id of {fixture::guild}%"
+	mark "channel id: %discord id of {fixture::channel}%"
+	mark "member id: %discord id of {fixture::member}%"
+	mark "member guild id: %discord id of guild of {fixture::member}%"
+	mark "role id: %discord id of {fixture::role}%"
+	mark "category id: %discord id of {fixture::category}%"
+	mark "permission: %{fixture::permission}%"
+	mark "member mention: %mention of {fixture::member}%"
+	mark "channel mention: %mention of {fixture::channel}%"
+	send "hello" to {fixture::channel} and store it in {_sent}
+	mark "sent: %content of {_sent}%"
+	fetch the name of {fixture::user} and store it in {_name}
+	mark "fetched name: %{_name}%"
+	fetch the roles of {fixture::member} and store it in {_roles::*}
+	mark "fetched roles: %size of {_roles::*}%"
+	fetch the name of {fixture::gone-user} and store it in {_gone}
+	mark "gone fetch: %last discord error%"
+	mark "gone type: %error type of last discord error%"
+	if {_gone} is not set:
+		mark "nothing stored"

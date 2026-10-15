@@ -124,7 +124,7 @@ public final class CommandSync {
 	}
 
 	private CompletionStage<Integer> run() {
-		List<CommandData> commands = CommandRegistry.build();
+		List<CommandData> commands = JdaSpecs.build();
 		String hash = hash(commands);
 		if (hash.equals(current))
 			return CompletableFuture.completedFuture(0);

@@ -7,6 +7,7 @@ import java.net.http.WebSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionStage;
@@ -25,6 +26,7 @@ import io.github.itsnotethann.skord.bridge.api.BridgePlatform;
 import io.github.itsnotethann.skord.protocol.BridgeClient;
 import io.github.itsnotethann.skord.protocol.Frame;
 import io.github.itsnotethann.skord.protocol.FrameCodec;
+import io.github.itsnotethann.skord.protocol.Scope;
 
 /**
  * The bridge against a fake game server over a real local WebSocket. No Skript: the bot's {@link BridgeServer}
@@ -125,6 +127,8 @@ public final class BridgeTest {
 		try {
 			linkStore(work);
 			linkCommands(work);
+			heldAge(work);
+			scopes(work);
 			handshake(work);
 			refusals(work);
 			replaced(work);
@@ -140,6 +144,25 @@ public final class BridgeTest {
 		}
 		FAILURES.forEach(failure -> System.out.println("BRIDGETEST FAIL: " + failure));
 		System.exit(1);
+	}
+
+	private static void heldAge(Path work) {
+		System.out.println("-- held queue age");
+		Path file = work.resolve("held").resolve("old.jsonl");
+		io.github.itsnotethann.skord.bridge.HeldQueue queue =
+			new io.github.itsnotethann.skord.bridge.HeldQueue("old", file, 100, 1_000);
+		com.google.gson.JsonObject data = new com.google.gson.JsonObject();
+		queue.add("a", "test-boost", data, 0);
+		queue.add("b", "test-boost", data, 500);
+		queue.add("c", "test-boost", data, 1_200);
+		check(queue.ids().equals(List.of("b", "c")), "an event past max-age is dropped on the next add: " + queue.ids());
+		check(queue.drops().size() == 1, "the age drop is logged");
+		check(queue.pending(1_700).stream().map(entry -> entry.id()).toList().equals(List.of("c")),
+			"an event is dropped by age when the queue is read");
+		queue.ack("c");
+		check(!queue.add("c", "test-boost", data, 1_800), "an acked id is not queued again");
+		check(new io.github.itsnotethann.skord.bridge.HeldQueue("old", file, 100, 1_000).ids().isEmpty(),
+			"a reloaded queue has nothing left");
 	}
 
 	private static void linkStore(Path work) throws Exception {
@@ -181,6 +204,55 @@ public final class BridgeTest {
 		check(!config.toString().contains("topsecret"), "BridgeConfig never prints the secret");
 		check(!new Frame.Hello(1, "hub", "skl_topsecret", "test").toString().contains("topsecret"),
 			"Hello never prints the secret");
+	}
+
+	private static void scopes(Path work) throws Exception {
+		System.out.println("-- scopes");
+		Path file = work.resolve("scope").resolve("links.yml");
+		LinkStore store = new LinkStore(file);
+		List<String> created = LinkCommands.run(store, null, name -> {}, new String[] {"create", "hub", "--allow", "send,reply"});
+		check(created.stream().anyMatch(line -> line.contains("scope:  send, reply")), "create --allow shows the scope");
+		check(store.scope("hub").equals(EnumSet.of(Scope.SEND, Scope.REPLY)), "the scope is stored with the link");
+		check(Files.readString(file).contains("- send"), "the scope is written beside the hash");
+		check(new LinkStore(file).scope("hub").size() == 2, "the scope survives a restart");
+		check(LinkCommands.run(store, null, name -> {}, new String[] {"list"}).stream()
+			.anyMatch(line -> line.contains("hub") && line.contains("scope: send, reply")), "list shows the scope");
+
+		List<String> unknown = LinkCommands.run(store, null, name -> {}, new String[] {"create", "bad", "--allow", "send,banana"});
+		check(unknown.getFirst().contains("Unknown scope banana") && !store.exists("bad"),
+			"an unknown scope word is an error and creates nothing");
+		check(LinkCommands.run(store, null, name -> {}, new String[] {"scope", "hub", "--allow", "send,teleport"})
+			.getFirst().contains("Unknown scope teleport") && store.allows("hub", Scope.REPLY),
+			"an unknown word in sk link scope changes nothing");
+		check(LinkCommands.run(store, null, name -> {}, new String[] {"scope", "hub"}).getFirst().contains("Say what"),
+			"sk link scope without --allow says so");
+
+		check(store.allows("hub", Scope.SEND) && !store.allows("hub", Scope.ROLES), "allows follows the scope");
+		LinkCommands.run(store, null, name -> {}, new String[] {"scope", "hub", "--allow", "roles"});
+		check(store.allows("hub", Scope.ROLES) && !store.allows("hub", Scope.SEND), "sk link scope applies at once");
+
+		Path old = work.resolve("scope").resolve("old.yml");
+		Files.writeString(old, "links:\n  old:\n    sha256: abc\n    created: yesterday\n");
+		LinkStore legacy = new LinkStore(old);
+		check(legacy.exists("old") && legacy.scope("old").isEmpty(), "a link with no scope loads as an empty scope");
+		check(LinkCommands.run(legacy, null, name -> {}, new String[] {"list"}).stream()
+			.anyMatch(line -> line.contains("old") && line.contains("scope: none")), "list says a legacy link has no scope");
+
+		Path scoped = work.resolve("scope").resolve("s.yml");
+		String secret = new LinkStore(scoped).create("hub", EnumSet.of(Scope.CALL));
+		check(secret != null && !Files.readString(scoped).contains(secret), "a link with a scope still never writes its secret");
+
+		LinkStore live = new LinkStore(work.resolve("scope").resolve("live.yml"));
+		String liveSecret = live.create("survival", EnumSet.of(Scope.SEND));
+		BridgeServer server = start(live, new Events());
+		try {
+			Bridge bridge = Bridge.start(config(server, "survival", liveSecret), new FakePlatform(work));
+			await(() -> bridge.connected(), "a scoped server connects");
+			check(bridge.scope().equals(EnumSet.of(Scope.SEND)), "welcome carries the granted scope");
+			bridge.close();
+		} finally {
+			server.shutdown();
+		}
 	}
 
 	private static void handshake(Path work) throws Exception {

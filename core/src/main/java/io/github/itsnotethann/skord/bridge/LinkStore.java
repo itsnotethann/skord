@@ -11,14 +11,20 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 
+import io.github.itsnotethann.skord.protocol.Listen;
+import io.github.itsnotethann.skord.protocol.Scope;
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
@@ -28,10 +34,11 @@ import org.yaml.snakeyaml.Yaml;
  */
 public final class LinkStore {
 
-	public record Link(String name, String sha256, String created) {}
+	public record Link(String name, String sha256, String created, Set<Scope> scope, Set<Listen> listen) {}
 
 	private static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9_-]{0,31}");
 	private static final SecureRandom RANDOM = new SecureRandom();
+	private static final Logger LOGGER = LoggerFactory.getLogger("skord");
 
 	private final Path file;
 	private final Map<String, Link> links = new TreeMap<>();
@@ -48,8 +55,28 @@ public final class LinkStore {
 			for (Map.Entry<?, ?> entry : map.entrySet()) {
 				if (entry.getValue() instanceof Map<?, ?> value && value.get("sha256") != null) {
 					String name = String.valueOf(entry.getKey());
+					Set<Scope> scope = EnumSet.noneOf(Scope.class);
+					if (value.get("scope") instanceof List<?> words) {
+						for (Object word : words) {
+							Scope parsed = Scope.of(String.valueOf(word));
+							if (parsed == null)
+								LOGGER.warn("Link '{}' has an unknown scope word '{}' in {}; ignored", name, word, file);
+							else
+								scope.add(parsed);
+						}
+					}
+					Set<Listen> listen = EnumSet.noneOf(Listen.class);
+					if (value.get("listen") instanceof List<?> words) {
+						for (Object word : words) {
+							Listen parsed = Listen.of(String.valueOf(word));
+							if (parsed == null)
+								LOGGER.warn("Link '{}' has an unknown listen word '{}' in {}; ignored", name, word, file);
+							else
+								listen.add(parsed);
+						}
+					}
 					links.put(name, new Link(name, String.valueOf(value.get("sha256")),
-						String.valueOf(value.get("created"))));
+						String.valueOf(value.get("created")), scope, listen));
 				}
 			}
 		}
@@ -60,15 +87,69 @@ public final class LinkStore {
 	}
 
 	/** Creates a link and returns its secret, which is not stored. Returns null if the name is taken. */
-	public synchronized @Nullable String create(String name) throws IOException {
+	public synchronized @Nullable String create(String name, Set<Scope> scope) throws IOException {
+		return create(name, scope, EnumSet.noneOf(Listen.class));
+	}
+
+	public synchronized @Nullable String create(String name, Set<Scope> scope, Set<Listen> listen) throws IOException {
 		if (links.containsKey(name))
 			return null;
 		byte[] bytes = new byte[32];
 		RANDOM.nextBytes(bytes);
 		String secret = "skl_" + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-		links.put(name, new Link(name, hash(secret), Instant.now().toString()));
+		links.put(name, new Link(name, hash(secret), Instant.now().toString(), copy(scope), copyListen(listen)));
 		save();
 		return secret;
+	}
+
+	public synchronized @Nullable String create(String name) throws IOException {
+		return create(name, EnumSet.noneOf(Scope.class));
+	}
+
+	public synchronized boolean setScope(String name, Set<Scope> scope) throws IOException {
+		Link link = links.get(name);
+		if (link == null)
+			return false;
+		links.put(name, new Link(name, link.sha256(), link.created(), copy(scope), link.listen()));
+		save();
+		return true;
+	}
+
+	public synchronized boolean setListen(String name, Set<Listen> listen) throws IOException {
+		Link link = links.get(name);
+		if (link == null)
+			return false;
+		links.put(name, new Link(name, link.sha256(), link.created(), link.scope(), copyListen(listen)));
+		save();
+		return true;
+	}
+
+	public synchronized Set<Listen> listen(String name) {
+		Link link = links.get(name);
+		return link == null ? EnumSet.noneOf(Listen.class) : copyListen(link.listen());
+	}
+
+	public synchronized boolean listens(String name, Listen listen) {
+		Link link = links.get(name);
+		return link != null && link.listen().contains(listen);
+	}
+
+	private static Set<Listen> copyListen(Set<Listen> listen) {
+		return listen.isEmpty() ? EnumSet.noneOf(Listen.class) : EnumSet.copyOf(listen);
+	}
+
+	public synchronized Set<Scope> scope(String name) {
+		Link link = links.get(name);
+		return link == null ? EnumSet.noneOf(Scope.class) : copy(link.scope());
+	}
+
+	public synchronized boolean allows(String name, Scope scope) {
+		Link link = links.get(name);
+		return link != null && link.scope().contains(scope);
+	}
+
+	private static Set<Scope> copy(Set<Scope> scope) {
+		return scope.isEmpty() ? EnumSet.noneOf(Scope.class) : EnumSet.copyOf(scope);
 	}
 
 	/** Removes a link. Returns false if there wasn't one. */
@@ -102,6 +183,8 @@ public final class LinkStore {
 			Map<String, Object> entry = new LinkedHashMap<>();
 			entry.put("sha256", link.sha256());
 			entry.put("created", link.created());
+			entry.put("scope", link.scope().stream().sorted().map(item -> item.wire).toList());
+			entry.put("listen", link.listen().stream().sorted().map(item -> item.wire).toList());
 			entries.put(link.name(), entry);
 		}
 		DumperOptions options = new DumperOptions();

@@ -8,11 +8,22 @@ public final class BridgeRequestException extends RuntimeException {
 
 	private final String errorType;
 	private final int code;
+	private final String scope;
 
 	public BridgeRequestException(String errorType, String message, int code) {
+		this(errorType, message, code, null);
+	}
+
+	public BridgeRequestException(String errorType, String message, int code, String scope) {
 		super(message);
 		this.errorType = errorType;
 		this.code = code;
+		this.scope = scope;
+	}
+
+	/** For an out of scope failure: the scope word the link lacks. Null otherwise. */
+	public String scope() {
+		return scope;
 	}
 
 	public String errorType() {

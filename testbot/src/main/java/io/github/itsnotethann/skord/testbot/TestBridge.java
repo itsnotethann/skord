@@ -42,6 +42,8 @@ final class TestBridge {
 	/** The request timeout the bot is started with: short, so the "server never answered" case stays quick. */
 	static final long TIMEOUT_MILLIS = 700;
 
+	static final int HELD_MAX_EVENTS = 5;
+
 	private static final ScheduledExecutorService TIMERS = Executors.newSingleThreadScheduledExecutor(runnable -> {
 		Thread thread = new Thread(runnable, "testbot-bridge");
 		thread.setDaemon(true);
@@ -51,18 +53,69 @@ final class TestBridge {
 
 	private static volatile int port;
 	private static volatile BridgeHost host;
+	private static volatile Path workDirectory;
 
 	private TestBridge() {}
 
 	/** Starts the bot's bridge on a free local port. Call before scripts load. */
 	static void start(Path work, ScriptThread scriptThread) throws IOException {
+		workDirectory = work;
 		try (ServerSocket probe = new ServerSocket(0)) {
 			port = probe.getLocalPort();
 		}
-		host = BridgeHost.start(work, new BridgeHost.Settings(port, "127.0.0.1", TIMEOUT_MILLIS),
+		host = BridgeHost.start(work, new BridgeHost.Settings(port, "127.0.0.1", TIMEOUT_MILLIS, HELD_MAX_EVENTS,
+			BridgeHost.Settings.DEFAULT_HELD_MAX_AGE_MILLIS, List.of("b")),
 			() -> new Frame.BotInfo("1", "TestBot"), scriptThread::execute);
 		if (host.server() == null)
 			throw new IllegalStateException("the test bridge did not start");
+	}
+
+	static Path workDir() {
+		return workDirectory;
+	}
+
+	static String url() {
+		return "ws://127.0.0.1:" + port;
+	}
+
+	static BridgeRouter router() {
+		return host.router();
+	}
+
+	/** A fresh link for a server process; its secret goes on that process's command line. */
+	static String createLink(String name, @org.jetbrains.annotations.Nullable String allow,
+							 @org.jetbrains.annotations.Nullable String listen) throws IOException {
+		host.links().revoke(name);
+		var scope = allow == null ? java.util.EnumSet.noneOf(io.github.itsnotethann.skord.protocol.Scope.class)
+			: io.github.itsnotethann.skord.protocol.Scope.parse(allow).scopes();
+		var listens = listen == null ? java.util.EnumSet.noneOf(io.github.itsnotethann.skord.protocol.Listen.class)
+			: io.github.itsnotethann.skord.protocol.Listen.parse(listen).listens();
+		return host.links().create(name, scope, listens);
+	}
+
+	/** Subscribes a fake server (a plain bridge, no Skript) to raw event specs: {@code kind} or {@code kind:channel=id}. */
+	static void subscribe(String name, String[] specs) {
+		FakeServer server = SERVERS.get(name);
+		if (server == null || server.bridge == null)
+			throw new IllegalStateException("fake server '" + name + "' isn't connected");
+		List<Frame.EventSpec> events = new ArrayList<>();
+		for (String spec : specs) {
+			String[] parts = spec.split(":", 2);
+			com.google.gson.JsonObject filters = new com.google.gson.JsonObject();
+			if (parts.length > 1) {
+				for (String filter : parts[1].split(",")) {
+					String[] pair = filter.split("=", 2);
+					filters.addProperty(pair[0], pair[1]);
+				}
+			}
+			events.add(new Frame.EventSpec(parts[0], filters, false));
+		}
+		server.bridge.subscribe(events);
+	}
+
+	static List<String> subscriptionRefusals(String name) {
+		FakeServer server = SERVERS.get(name);
+		return server == null ? List.of() : List.copyOf(server.refusals);
 	}
 
 	private static final class FakeServer {
@@ -70,6 +123,8 @@ final class TestBridge {
 		final String name;
 		final Map<String, Command> staged = new LinkedHashMap<>();
 		final List<String> rejected = new CopyOnWriteArrayList<>();
+		final List<String> refusals = new CopyOnWriteArrayList<>();
+		final java.util.Set<String> roster = java.util.Collections.synchronizedSet(new java.util.LinkedHashSet<>());
 		volatile Bridge bridge;
 
 		FakeServer(String name) {
@@ -102,19 +157,34 @@ final class TestBridge {
 
 	/** Connects a server called {@code name}, creating its link first if it has none. Completes once welcomed. */
 	static CompletionStage<Void> connect(String name) {
+		return connect(name, null);
+	}
+
+	static CompletionStage<Void> connect(String name, @org.jetbrains.annotations.Nullable String scope) {
 		FakeServer server = SERVERS.computeIfAbsent(name, FakeServer::new);
 		CompletableFuture<Void> connected = new CompletableFuture<>();
 		try {
 			// A secret can't be read back, so a server that already has a link gets a fresh one.
 			host.links().revoke(name);
-			String secret = host.links().create(name);
+			java.util.Set<io.github.itsnotethann.skord.protocol.Scope> scopes = scope == null
+				? java.util.EnumSet.noneOf(io.github.itsnotethann.skord.protocol.Scope.class)
+				: io.github.itsnotethann.skord.protocol.Scope.parse(scope).scopes();
+			String secret = host.links().create(name, scopes);
 			BridgeConfig config = BridgeConfig.of(Map.of("url", "ws://127.0.0.1:" + port, "name", name,
 				"secret", secret, "timeout", "2"));
 			Bridge bridge = Bridge.start(config, new Platform());
+			synchronized (server.roster) {
+				server.roster.forEach(player -> bridge.playerJoined(uuidOf(player), player));
+			}
 			bridge.addListener(new Bridge.ConnectionListener() {
 				@Override
 				public void onConnect(Frame.BotInfo bot) {
 					connected.complete(null);
+				}
+
+				@Override
+				public void onSubscriptionsRejected(List<Frame.SubscribeResult.Rejection> rejected) {
+					rejected.forEach(rejection -> server.refusals.add(rejection.kind() + ": " + rejection.reason()));
 				}
 
 				@Override
@@ -168,7 +238,7 @@ final class TestBridge {
 		server.rejected.clear();
 		server.bridge.declareCommands(new ArrayList<>(server.staged.values()));
 		return until(() -> server.staged.keySet().stream().allMatch(command ->
-				name.equals(CommandRegistry.owner(command))
+				CommandRegistry.owners(command).contains(name)
 					|| server.rejected.stream().anyMatch(line -> line.startsWith(command + ":"))),
 			"the bot to take " + name + "'s commands");
 	}
@@ -227,14 +297,16 @@ final class TestBridge {
 	/** Records, under {@code script}, each message of this name the server receives. */
 	static void listen(String name, String message, String script) {
 		FakeServer server = SERVERS.computeIfAbsent(name, FakeServer::new);
-		server.bridge.onMessage(message, data ->
-			TestBot.recorder().mark(script, name + " got message " + message + ": " + show(data)));
+		server.bridge.onCall(message, data -> {
+			TestBot.recorder().mark(script, name + " got message " + message + ": " + show(data));
+			return CompletableFuture.completedFuture(com.google.gson.JsonNull.INSTANCE);
+		});
 	}
 
 	/** {@code "!hang"} never answers and {@code "!fail"} answers with an error; otherwise {@link #dataOf}. */
 	static void answer(String name, String request, String data) {
 		FakeServer server = SERVERS.computeIfAbsent(name, FakeServer::new);
-		server.bridge.onRequest(request, ignored -> switch (data) {
+		server.bridge.onCall(request, ignored -> switch (data) {
 			case "!hang" -> new CompletableFuture<>();
 			case "!fail" -> CompletableFuture.failedFuture(new IllegalStateException("fake server refusal"));
 			default -> CompletableFuture.completedFuture(dataOf(data));
@@ -257,6 +329,44 @@ final class TestBridge {
 					throw new io.github.itsnotethann.skord.bridge.BridgeFailure(failure.errorType(), failure.getMessage());
 				throw new RuntimeException(cause);
 			});
+	}
+
+	static List<String> linkCommand(String line) {
+		return host.link(line.trim().split("\\s+"));
+	}
+
+	static void playerChange(String name, String player, boolean joined) {
+		FakeServer server = SERVERS.computeIfAbsent(name, FakeServer::new);
+		if (joined)
+			server.roster.add(player);
+		else
+			server.roster.remove(player);
+		Bridge bridge = server.bridge;
+		if (bridge == null)
+			return;
+		if (joined)
+			bridge.playerJoined(uuidOf(player), player);
+		else
+			bridge.playerLeft(uuidOf(player), player);
+	}
+
+	static String uuidOf(String player) {
+		return java.util.UUID.nameUUIDFromBytes(player.getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+	}
+
+	static void linkPlayer(String discordId, String player) {
+		host.router().playerLinks().link(discordId, uuidOf(player));
+	}
+
+	static List<String> knownPlayers(String name) {
+		return host.router().players(name);
+	}
+
+	static List<String> grantedScope(String name) {
+		FakeServer server = SERVERS.get(name);
+		if (server == null || server.bridge == null)
+			return List.of();
+		return server.bridge.scope().stream().sorted().map(item -> item.wire).toList();
 	}
 
 	/** As if the bot had just started: server-owned commands forgotten, then loaded again from disk. */

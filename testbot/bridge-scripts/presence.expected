@@ -1,0 +1,22 @@
+arena offline before connecting
+arena has no last seen yet
+bad scope: Unknown scope banana. Scopes are: send, reply, edit, delete, roles, channels, members, read, call.
+scope of a link that does not exist: No link called 'arena'.
+connect event: arena, with a time
+granted: send and reply
+list: arena connected with scope send, reply
+arena online after connecting
+arena is among the online servers
+arena is among the linked servers
+changed: Link 'arena' may now: call.
+list: arena now has scope call
+players after joins: Ada and Grace (2)
+players after a delta: Grace and Linus (2)
+disconnect event: arena, with a time
+arena offline after disconnecting
+last seen set while arena is down
+players while down: 0
+last seen survives a bot restart
+connect event: arena, with a time
+players after reconnect: Grace and Linus (2)
+disconnect event: arena, with a time

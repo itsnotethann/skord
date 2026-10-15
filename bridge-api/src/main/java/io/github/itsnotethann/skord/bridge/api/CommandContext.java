@@ -45,4 +45,7 @@ public interface CommandContext {
 
 	/** A further message after the first answer. Completes with its id. */
 	CompletionStage<String> followUp(String text, boolean ephemeral);
+
+	/** Removes the original reply, such as a public deferral an ephemeral answer replaces. */
+	CompletionStage<Void> deleteOriginal();
 }

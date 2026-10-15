@@ -65,9 +65,55 @@ val bridgeScripts by tasks.registering(JavaExec::class) {
 	outputs.upToDateWhen { false }
 }
 
+// A game server that runs Skript, as a child process of the bot (one JVM cannot hold two script engines). Its
+// own run, because the commands the server declares join the bot's and would change the other scripts' syncs.
+val remoteScripts by tasks.registering(JavaExec::class) {
+	group = "verification"
+	dependsOn(tasks.classes)
+	classpath = sourceSets.main.get().runtimeClasspath
+	mainClass.set("io.github.itsnotethann.skord.testbot.TestBot")
+	systemProperty("skord.ack-watchdog-ms", "300")
+	args(layout.projectDirectory.dir("bridge-remote").asFile.absolutePath,
+		layout.buildDirectory.dir("remotetest").get().asFile.absolutePath,
+		layout.projectDirectory.dir("server-scripts").asFile.absolutePath)
+	inputs.dir(layout.projectDirectory.dir("bridge-remote"))
+	inputs.dir(layout.projectDirectory.dir("server-scripts"))
+	outputs.upToDateWhen { false }
+}
+
+// Held events: the kill matrix needs a server it can kill, so it is a child process too.
+val heldScripts by tasks.registering(JavaExec::class) {
+	group = "verification"
+	dependsOn(tasks.classes)
+	classpath = sourceSets.main.get().runtimeClasspath
+	mainClass.set("io.github.itsnotethann.skord.testbot.TestBot")
+	systemProperty("skord.ack-watchdog-ms", "300")
+	args(layout.projectDirectory.dir("bridge-held").asFile.absolutePath,
+		layout.buildDirectory.dir("heldtest").get().asFile.absolutePath,
+		layout.projectDirectory.dir("server-held").asFile.absolutePath)
+	inputs.dir(layout.projectDirectory.dir("bridge-held"))
+	inputs.dir(layout.projectDirectory.dir("server-held"))
+	outputs.upToDateWhen { false }
+}
+
+// Shared commands: three server processes, each with its own folder of scripts under server-shared.
+val sharedScripts by tasks.registering(JavaExec::class) {
+	group = "verification"
+	dependsOn(tasks.classes)
+	classpath = sourceSets.main.get().runtimeClasspath
+	mainClass.set("io.github.itsnotethann.skord.testbot.TestBot")
+	systemProperty("skord.ack-watchdog-ms", "300")
+	args(layout.projectDirectory.dir("bridge-shared").asFile.absolutePath,
+		layout.buildDirectory.dir("sharedtest").get().asFile.absolutePath,
+		layout.projectDirectory.dir("server-shared").asFile.absolutePath)
+	inputs.dir(layout.projectDirectory.dir("bridge-shared"))
+	inputs.dir(layout.projectDirectory.dir("server-shared"))
+	outputs.upToDateWhen { false }
+}
+
 // One command runs all of it: the scripts, then the bridge, then the scripts that use it.
 botTest {
-	dependsOn(bridgeTest, bridgeScripts)
+	dependsOn(bridgeTest, bridgeScripts, remoteScripts, heldScripts, sharedScripts)
 }
 
 tasks.check {

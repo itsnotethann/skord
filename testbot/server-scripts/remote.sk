@@ -1,0 +1,30 @@
+# Runs on a real game-server process. The bot carries out everything it does on Discord.
+
+on ready:
+	mark "ready"
+
+slash command greet:
+	description: Greets someone through the bot
+	arguments:
+		who: text "Who to greet"
+	trigger:
+		reply with "Hello %arg-who% from the server!"
+
+on message received in channel "111111111111111111":
+	set {_channel} to channel with id "111111111111111111"
+	set {_category} to category with id "222222222222222222"
+	send "pong" to {_channel} and store it in {_sent}
+	if last discord error is set:
+		mark "send failed: %error type of last discord error%, missing scope %missing scope of last discord error%"
+	else:
+		mark "send ok"
+	reply with "pong reply"
+	if last discord error is set:
+		mark "reply failed: %error type of last discord error%"
+	else:
+		mark "reply ok"
+	create a text channel named "from-server" in category {_category} and store it in {_made}
+	if last discord error is set:
+		mark "create failed: %error type of last discord error%, missing scope %missing scope of last discord error%"
+	else:
+		mark "created %name of {_made}%"

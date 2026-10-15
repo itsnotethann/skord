@@ -39,10 +39,10 @@ final class TestSyntax {
 	private TestSyntax() {}
 
 	static void register() {
-		Skript.registerEvent("Test", EvtTest.class, TestEvent.class, "test %string%");
+		Skript.registerEvent("Test",EvtTest.class, TestEvent.class, "test %string%");
 		Skript.registerEffect(EffMark.class, "mark %objects%");
 		Skript.registerEffect(EffFireTest.class, "fire test event %string%");
-		Skript.registerEffect(EffFireSlash.class, "fire slash command %string% [with options %-strings%]");
+		Skript.registerEffect(EffFireSlash.class, "fire slash command %string% [with options %-strings%] [as user %-string%]");
 		Skript.registerEffect(EffFakeRequest.class, RestEffect.rest("fake request %string%"));
 		Skript.registerEffect(EffSettle.class, "complete fake request %string% with %string%",
 			"fail fake request %string% with %string%",
@@ -56,7 +56,17 @@ final class TestSyntax {
 		Skript.registerEffect(EffFakeServer.class,
 			RestEffect.rest("connect fake server %string%"),
 			RestEffect.rest("disconnect fake server %string%"),
-			RestEffect.rest("publish commands of fake server %string%"));
+			RestEffect.rest("publish commands of fake server %string%"),
+			RestEffect.rest("connect fake server %string% allowing %string%"));
+		Skript.registerEffect(EffFakePlayer.class,
+			"fake server %string% reports player %string% joining",
+			"fake server %string% reports player %string% leaving");
+		Skript.registerExpression(ExprLinkOutput.class, String.class, ExpressionType.SIMPLE,
+			"[the] output of sk link %string%");
+		Skript.registerExpression(ExprKnownPlayers.class, String.class, ExpressionType.SIMPLE,
+			"[the] known players of server %string%");
+		Skript.registerExpression(ExprGrantedScope.class, String.class, ExpressionType.SIMPLE,
+			"[the] granted scope of fake server %string%");
 		Skript.registerEffect(EffDeclare.class,
 			"fake server %string% declares command %string% [with arguments %-string%] and behaviour %string%");
 		Skript.registerEffect(EffRestartBot.class, "simulate a bot restart");
@@ -67,7 +77,21 @@ final class TestSyntax {
 		Skript.registerEffect(EffFakeAsk.class, RestEffect.rest("fake server %string% asks the bot for %string% [with %-string%]"));
 		Skript.registerExpression(ExprRejections.class, String.class, ExpressionType.SIMPLE,
 			"[the] rejections of fake server %string%");
-	}
+		Skript.registerEffect(EffServerProcess.class,
+			RestEffect.rest("start server process %string% [allowing %-string%] [listening to %-string%] "
+	+ "[using scripts %-string%]"),
+			RestEffect.rest("reload server process %string%"));
+		Skript.registerEffect(EffFireMessage.class,
+			"fire message event in channel %string% with text %string%");
+		Skript.registerEffect(EffRawSubscribe.class, "fake server %string% subscribes to %strings%");
+		Skript.registerExpression(ExprBridgeCount.class, Long.class, ExpressionType.SIMPLE,
+			"[the] forwarded events of server %string%",
+			"[the] refused subscriptions of server %string%",
+			"[the] fake discord calls of %string%");
+		Skript.registerExpression(ExprRefusals.class, String.class, ExpressionType.SIMPLE,
+		"[the] subscription refusals of fake server %string%");
+		TestHeldSyntax.register();
+		}
 
 	static String scriptName(@Nullable Script script) {
 		return script == null ? "?" : new File(script.getConfig().getFileName()).getName();
@@ -160,6 +184,7 @@ final class TestSyntax {
 
 		private Expression<String> name;
 		private @Nullable Expression<String> options;
+		private @Nullable Expression<String> user;
 		private String script;
 
 		@Override
@@ -167,6 +192,7 @@ final class TestSyntax {
 		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
 			name = (Expression<String>) exprs[0];
 			options = (Expression<String>) exprs[1];
+			user = (Expression<String>) exprs[2];
 			script = scriptName(getParser().getCurrentScript());
 			return true;
 		}
@@ -191,7 +217,10 @@ final class TestSyntax {
 				values.put(parts[0], value);
 			}
 			Interaction interaction = new Interaction("/" + command, FakeDiscord.responder(script));
-			Skript.eventBus().fire(new SlashEvent(command, interaction, values, null, null, null, null));
+			String userId = user == null ? null : user.getSingle(event);
+io.github.itsnotethann.skord.discord.UserRef invoker = userId == null ? null
+	: new io.github.itsnotethann.skord.discord.UserRef(Long.parseLong(userId), "tester");
+Skript.eventBus().fire(new SlashEvent(command, interaction, values, invoker, null, null, null));
 		}
 
 		@Override
@@ -250,7 +279,7 @@ final class TestSyntax {
 				case 0 -> request.complete(result);
 				case 1 -> request.completeExceptionally(new FakeDiscord.FakeError((String) result));
 				case 2 -> request.completeExceptionally(FakeDiscord.response(((Number) result).intValue()));
-				case 3 -> request.completeExceptionally(new FakeDiscord.FakePermissionError((Permission) result));
+				case 3 -> request.completeExceptionally(new FakeDiscord.FakePermissionError(Permission.valueOf(((io.github.itsnotethann.skord.protocol.DiscordPermission) result).name())));
 				default -> request.completeExceptionally(
 					new HierarchyException("Can't modify a role with higher or equal highest role than yourself!"));
 			}
@@ -360,12 +389,14 @@ final class TestSyntax {
 	public static final class EffFakeServer extends RestEffect {
 
 		private Expression<String> name;
+		private @Nullable Expression<String> scope;
 		private int action;
 
 		@Override
 		@SuppressWarnings("unchecked")
 		protected boolean initRest(Expression<?>[] exprs, int matchedPattern, ParseResult parseResult) {
 			name = (Expression<String>) exprs[0];
+			scope = matchedPattern == 3 ? (Expression<String>) exprs[1] : null;
 			action = matchedPattern;
 			return true;
 		}
@@ -378,6 +409,7 @@ final class TestSyntax {
 			return switch (action) {
 				case 0 -> TestBridge.connect(server);
 				case 1 -> TestBridge.disconnect(server);
+				case 3 -> TestBridge.connect(server, scope == null ? null : scope.getSingle(event));
 				default -> TestBridge.publish(server);
 			};
 		}
@@ -544,6 +576,310 @@ final class TestSyntax {
 		@Override
 		public String toString(@Nullable PlatformEvent event, boolean debug) {
 			return "the rejections of fake server " + name.toString(event, debug);
+		}
+	}
+
+	public static final class EffFakePlayer extends Effect {
+
+		private Expression<String> server;
+		private Expression<String> player;
+		private boolean joining;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			server = (Expression<String>) exprs[0];
+			player = (Expression<String>) exprs[1];
+			joining = matchedPattern == 0;
+			return true;
+		}
+
+		@Override
+		protected void execute(PlatformEvent event) {
+			String name = server.getSingle(event);
+			String who = player.getSingle(event);
+			if (name != null && who != null)
+				TestBridge.playerChange(name, who, joining);
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "fake server " + server.toString(event, debug) + " reports player " + player.toString(event, debug);
+		}
+	}
+
+	public static final class ExprLinkOutput extends SimpleExpression<String> {
+
+		private Expression<String> line;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			line = (Expression<String>) exprs[0];
+			return true;
+		}
+
+		@Override
+		protected String[] get(PlatformEvent event) {
+			String value = line.getSingle(event);
+			return value == null ? new String[0] : TestBridge.linkCommand(value).toArray(String[]::new);
+		}
+
+		@Override
+		public boolean isSingle() {
+			return false;
+		}
+
+		@Override
+		public Class<? extends String> getReturnType() {
+			return String.class;
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "the output of sk link " + line.toString(event, debug);
+		}
+	}
+
+	public static final class ExprKnownPlayers extends SimpleExpression<String> {
+
+		private Expression<String> name;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			name = (Expression<String>) exprs[0];
+			return true;
+		}
+
+		@Override
+		protected String[] get(PlatformEvent event) {
+			String server = name.getSingle(event);
+			return server == null ? new String[0] : TestBridge.knownPlayers(server).toArray(String[]::new);
+		}
+
+		@Override
+		public boolean isSingle() {
+			return false;
+		}
+
+		@Override
+		public Class<? extends String> getReturnType() {
+			return String.class;
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "the known players of server " + name.toString(event, debug);
+		}
+	}
+
+	public static final class ExprGrantedScope extends SimpleExpression<String> {
+
+		private Expression<String> name;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			name = (Expression<String>) exprs[0];
+			return true;
+		}
+
+		@Override
+		protected String[] get(PlatformEvent event) {
+			String server = name.getSingle(event);
+			return server == null ? new String[0] : TestBridge.grantedScope(server).toArray(String[]::new);
+		}
+
+		@Override
+		public boolean isSingle() {
+			return false;
+		}
+
+		@Override
+		public Class<? extends String> getReturnType() {
+			return String.class;
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "the granted scope of fake server " + name.toString(event, debug);
+		}
+	}
+
+	/** Starts or reloads a real server process (see {@link TestServer}); pauses until the bot has what it sent. */
+	public static final class EffServerProcess extends RestEffect {
+
+		private Expression<String> name;
+		private @Nullable Expression<String> allow;
+		private @Nullable Expression<String> listen;
+		private @Nullable Expression<String> profile;
+		private boolean reload;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		protected boolean initRest(Expression<?>[] exprs, int matchedPattern, ParseResult parseResult) {
+			name = (Expression<String>) exprs[0];
+			reload = matchedPattern == 1;
+			if (!reload) {
+				allow = (Expression<String>) exprs[1];
+				listen = (Expression<String>) exprs[2];
+profile = (Expression<String>) exprs[3];
+			}
+			return true;
+		}
+
+		@Override
+		protected @Nullable CompletionStage<?> request(PlatformEvent event) {
+			String server = name.getSingle(event);
+			if (server == null)
+				return null;
+			if (reload)
+				return ServerProcess.reload(server);
+			return ServerProcess.start(server, allow == null ? null : allow.getSingle(event),
+				listen == null ? null : listen.getSingle(event), profile == null ? null : profile.getSingle(event));
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return (reload ? "reload" : "start") + " server process " + name.toString(event, debug);
+		}
+	}
+
+	/** A message arrives in a channel, as the gateway would deliver it to the bot. */
+	public static final class EffFireMessage extends Effect {
+
+		private static final java.util.concurrent.atomic.AtomicLong IDS =
+			new java.util.concurrent.atomic.AtomicLong(700000000000000000L);
+
+		private Expression<String> channel;
+		private Expression<String> text;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			channel = (Expression<String>) exprs[0];
+			text = (Expression<String>) exprs[1];
+			return true;
+		}
+
+		@Override
+		protected void execute(PlatformEvent event) {
+			String id = channel.getSingle(event);
+			String content = text.getSingle(event);
+			if (id == null || content == null)
+				return;
+			long channelId = Long.parseLong(id);
+			var message = new io.github.itsnotethann.skord.discord.MessageRef(IDS.incrementAndGet(), channelId,
+				content, content);
+			Skript.eventBus().fire(new io.github.itsnotethann.skord.event.MessageEvent(message,
+				new io.github.itsnotethann.skord.discord.UserRef(444444444444444444L, "tester"),
+				new io.github.itsnotethann.skord.discord.ChannelRef(channelId, "fake-channel"), null));
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "fire message event in channel " + channel.toString(event, debug);
+		}
+	}
+
+	public static final class EffRawSubscribe extends Effect {
+
+		private Expression<String> server;
+		private Expression<String> specs;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			server = (Expression<String>) exprs[0];
+			specs = (Expression<String>) exprs[1];
+			return true;
+		}
+
+		@Override
+		protected void execute(PlatformEvent event) {
+			String name = server.getSingle(event);
+			if (name != null)
+				TestBridge.subscribe(name, specs.getArray(event));
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "fake server " + server.toString(event, debug) + " subscribes to " + specs.toString(event, debug);
+		}
+	}
+
+	public static final class ExprBridgeCount extends SimpleExpression<Long> {
+
+		private Expression<String> name;
+		private int which;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			name = (Expression<String>) exprs[0];
+			which = matchedPattern;
+			return true;
+		}
+
+		@Override
+		protected Long[] get(PlatformEvent event) {
+			String key = name.getSingle(event);
+			if (key == null)
+				return new Long[0];
+			return new Long[] {switch (which) {
+				case 0 -> (long) TestBridge.router().forwardedEvents(key);
+				case 1 -> (long) TestBridge.router().refusedSubscriptions(key);
+				default -> (long) FakeDiscord.calls(key);
+			}};
+		}
+
+		@Override
+		public boolean isSingle() {
+			return true;
+		}
+
+		@Override
+		public Class<? extends Long> getReturnType() {
+			return Long.class;
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "the bridge count of " + name.toString(event, debug);
+		}
+	}
+
+	public static final class ExprRefusals extends SimpleExpression<String> {
+
+		private Expression<String> name;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			name = (Expression<String>) exprs[0];
+			return true;
+		}
+
+		@Override
+		protected String[] get(PlatformEvent event) {
+			String server = name.getSingle(event);
+			return server == null ? new String[0] : TestBridge.subscriptionRefusals(server).toArray(String[]::new);
+		}
+
+		@Override
+		public boolean isSingle() {
+			return false;
+		}
+
+		@Override
+		public Class<? extends String> getReturnType() {
+			return String.class;
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "the subscription refusals of fake server " + name.toString(event, debug);
 		}
 	}
 

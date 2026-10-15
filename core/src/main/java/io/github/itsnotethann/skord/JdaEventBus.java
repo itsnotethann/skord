@@ -1,19 +1,26 @@
 package io.github.itsnotethann.skord;
 
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 
 import ch.njol.skript.effects.Delay;
 import ch.njol.skript.lang.Trigger;
 import io.github.itsnotethann.skord.bridge.BridgeRouter;
 import io.github.itsnotethann.skord.command.CommandRegistry;
+import io.github.itsnotethann.skord.discord.DiscordEvent;
+import io.github.itsnotethann.skord.discord.DiscordEvents;
+import io.github.itsnotethann.skord.discord.EventSpec;
 import io.github.itsnotethann.skord.event.InteractionEvent;
 import io.github.itsnotethann.skord.event.MessageEvent;
+import io.github.itsnotethann.skord.event.ReadyEvent;
 import io.github.itsnotethann.skord.event.SkordEvent;
 import io.github.itsnotethann.skord.event.SlashEvent;
+import io.github.itsnotethann.skord.jda.JdaRefs;
 import net.dv8tion.jda.api.events.GenericEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
@@ -35,8 +42,12 @@ import org.skriptlang.skript.platform.Registration;
  */
 public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.EventListener {
 
+	private record Subscriber(EventSpec spec, Consumer<DiscordEvent> handler) {
+	}
+
 	private final ScriptThread scriptThread;
 	private final Map<Class<?>, Channel> channels = new ConcurrentHashMap<>();
+	private final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
 	// Gateway events that arrive before scripts finish loading have no triggers to run; drop them.
 	private volatile boolean live;
 
@@ -46,6 +57,12 @@ public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.Ev
 
 	public void goLive() {
 		live = true;
+	}
+
+	public DiscordEvents.Subscription subscribe(EventSpec spec, Consumer<DiscordEvent> handler) {
+		Subscriber subscriber = new Subscriber(spec, handler);
+		subscribers.add(subscriber);
+		return () -> subscribers.remove(subscriber);
 	}
 
 	@Override
@@ -59,9 +76,9 @@ public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.Ev
 
 	private static @Nullable SkordEvent wrap(GenericEvent event) {
 		if (event instanceof MessageReceivedEvent message)
-			return new MessageEvent(message);
+			return JdaRefs.message(message);
 		if (event instanceof SlashCommandInteractionEvent slash)
-			return SlashEvent.from(slash);
+			return JdaRefs.slash(slash);
 		return null;
 	}
 
@@ -81,9 +98,9 @@ public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.Ev
 	}
 
 	private void dispatch(PlatformEvent event) {
-		String owner = null;
+		List<String> owners = List.of();
 		if (event instanceof SlashEvent slash) {
-			owner = CommandRegistry.owner(slash.command());
+			owners = CommandRegistry.owners(slash.command());
 			Trigger trigger = CommandRegistry.trigger(slash.command());
 			if (trigger != null)
 				trigger.execute(slash);
@@ -91,16 +108,76 @@ public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.Ev
 		Channel channel = channels.get(event.getClass());
 		if (channel != null)
 			channel.call(event);
+		publish(event);
 		// A server's command: the server runs it, and its own 'dispatched' settles the interaction.
-		if (owner != null && event instanceof SlashEvent slash) {
+		if (!owners.isEmpty() && event instanceof SlashEvent slash) {
 			BridgeRouter router = BridgeRouter.current();
 			if (router != null) {
-				router.forward(owner, slash, Delay.isDelayed(event));
+				router.forward(owners, slash, Delay.isDelayed(event));
 				return;
 			}
 		}
 		if (event instanceof InteractionEvent interaction)
 			interaction.interaction().afterDispatch(Delay.isDelayed(event));
+	}
+
+	private void publish(PlatformEvent event) {
+		if (subscribers.isEmpty())
+			return;
+		DiscordEvent published = switch (event) {
+			case ReadyEvent ready -> new DiscordEvent(EventSpec.Kind.READY, Map.of());
+			case MessageEvent message -> {
+				Map<String, Object> data = new HashMap<>();
+				data.put("message", message.message());
+				data.put("author", message.author());
+				data.put("channel", message.channel());
+				if (message.guild() != null)
+					data.put("guild", message.guild());
+				yield new DiscordEvent(EventSpec.Kind.MESSAGE, data);
+			}
+			case SlashEvent slash -> {
+				Map<String, Object> data = new HashMap<>();
+				data.put("command", slash.command());
+				data.put("options", slash.options());
+				if (slash.user() != null)
+					data.put("user", slash.user());
+				if (slash.member() != null)
+					data.put("member", slash.member());
+				if (slash.channel() != null)
+					data.put("channel", slash.channel());
+				if (slash.guild() != null)
+					data.put("guild", slash.guild());
+				yield new DiscordEvent(EventSpec.Kind.SLASH_COMMAND, data);
+			}
+			default -> null;
+		};
+		if (published != null)
+			deliver(published);
+	}
+
+	/** Hands a Discord event that has no script-facing {@link SkordEvent} to the subscribers. */
+	public void publishRaw(DiscordEvent published) {
+		if (scriptThread.isPrimaryThread())
+			deliver(published);
+		else
+			scriptThread.execute(() -> deliver(published));
+	}
+
+	private void deliver(DiscordEvent published) {
+		for (Subscriber subscriber : subscribers) {
+			if (subscriber.spec().kind() != published.kind())
+				continue;
+			boolean matches = true;
+			for (Map.Entry<String, String> filter : subscriber.spec().filters().entrySet())
+				matches &= filter.getValue().equals(filterText(published.data().get(filter.getKey())));
+			if (matches)
+				subscriber.handler().accept(published);
+		}
+	}
+
+	private static String filterText(@Nullable Object value) {
+		return value instanceof io.github.itsnotethann.skord.discord.DiscordRef ref
+			? Long.toString(ref.id()) : String.valueOf(value);
 	}
 
 	private static final class Channel implements EventChannel {

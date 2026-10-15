@@ -1,0 +1,64 @@
+# Held events survive both sides dying. The server is its own process; its marks are in server-held/held.expected.
+# The queue is capped at 5 events here.
+
+on ready:
+	start server process "held"
+	fire test boost "1"
+	wait 600 milliseconds
+
+	# The server is away, then the bot restarts with events queued; one more arrives after the restart.
+	kill server process "held"
+	fire test boost "2"
+	fire test boost "3"
+	set {_q::*} to held events of server "held"
+	mark "queued while away: %size of {_q::*}%"
+	simulate a bot restart
+	fire test boost "4"
+	set {_q::*} to held events of server "held"
+	mark "queued after the restart: %size of {_q::*}%"
+	start server process "held"
+	wait 600 milliseconds
+	set {_q::*} to held events of server "held"
+	mark "queued after delivery: %size of {_q::*}%"
+
+	# The server dies after its handler ran and before its ack was sent.
+	fire test boost "5"
+	wait 400 milliseconds
+	kill server process "held"
+	set {_q::*} to held events of server "held"
+	mark "queued after a missing ack: %size of {_q::*}%"
+	start server process "held"
+	wait 600 milliseconds
+	set {_q::*} to held events of server "held"
+	mark "queued after the redelivery: %size of {_q::*}%"
+
+	# The server dies in the middle of a handler, and another event arrives while it is away.
+	fire test boost "6"
+	wait 400 milliseconds
+	kill server process "held"
+	fire test boost "7"
+	start server process "held"
+	wait 600 milliseconds
+	release gate "g" of server process "held"
+	wait 400 milliseconds
+	set {_q::*} to held events of server "held"
+	mark "queued after the mid-handler death: %size of {_q::*}%"
+
+	# Past the cap the oldest are dropped and logged.
+	kill server process "held"
+	fire test boost "10"
+	fire test boost "11"
+	fire test boost "12"
+	fire test boost "13"
+	fire test boost "14"
+	fire test boost "15"
+	fire test boost "16"
+	set {_q::*} to held events of server "held"
+	mark "kept: %{_q::*}%"
+	set {_d::*} to held drops of server "held"
+	loop {_d::*}:
+		mark "logged: %loop-value%"
+	start server process "held"
+	wait 800 milliseconds
+	set {_q::*} to held events of server "held"
+	mark "queued at the end: %size of {_q::*}%"

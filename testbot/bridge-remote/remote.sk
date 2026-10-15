@@ -1,0 +1,66 @@
+# A game server that runs Skript is its own process (one JVM cannot hold two engines), linked to the bot over a
+# real local WebSocket. Its scripts are server-scripts/remote.sk and its marks are in remote.expected there.
+# Channels 111... and 222... are known to the fake Discord.
+
+on ready:
+	start server process "remote" allowing "send,reply,channels" listening to "messages"
+	set {_n} to forwarded events of server "remote"
+	mark "forwarded at start: %{_n}%"
+
+	# A message in the channel the server subscribed to is forwarded and its handler acts through the bot.
+	fire message event in channel "111111111111111111" with text "hello"
+	wait 400 milliseconds
+	set {_n} to forwarded events of server "remote"
+	mark "forwarded after the subscribed channel: %{_n}%"
+	set {_s} to fake discord calls of "send"
+	set {_r} to fake discord calls of "reply"
+	set {_c} to fake discord calls of "create-channel"
+	mark "discord calls: send %{_s}%, reply %{_r}%, create %{_c}%"
+
+	# A message elsewhere is not forwarded at all.
+	fire message event in channel "222222222222222222" with text "elsewhere"
+	wait 400 milliseconds
+	set {_n} to forwarded events of server "remote"
+	mark "forwarded after another channel: %{_n}%"
+
+	# The server's slash command is registered through the bot, and its reply lands on the interaction.
+	fire slash command "greet" with options "who=Ada"
+	wait 400 milliseconds
+
+	# Narrowing the scope while connected takes effect on the next action, which never reaches Discord.
+	set {_out::*} to output of sk link "scope remote --allow reply"
+	mark "narrowed: %{_out::1}%"
+	wait 300 milliseconds
+	fire message event in channel "111111111111111111" with text "again"
+	wait 400 milliseconds
+	set {_s} to fake discord calls of "send"
+	set {_r} to fake discord calls of "reply"
+	set {_c} to fake discord calls of "create-channel"
+	mark "discord calls: send %{_s}%, reply %{_r}%, create %{_c}%"
+
+	# Without the listen word the subscription is refused on the next subscribe, and nothing is forwarded.
+	set {_out::*} to output of sk link "scope remote --listen none"
+	wait 300 milliseconds
+	reload server process "remote"
+	set {_n} to forwarded events of server "remote"
+	set {_before} to {_n}
+	fire message event in channel "111111111111111111" with text "unheard"
+	wait 400 milliseconds
+	set {_n} to forwarded events of server "remote"
+	if {_n} is {_before}:
+		mark "nothing forwarded once the listen word is gone"
+	set {_f} to refused subscriptions of server "remote"
+	mark "refused: %{_f}%"
+
+	# A plain bridge client: one subscription it may have and one the bot has never heard of.
+	connect fake server "raw"
+	wait 150 milliseconds
+	set {_out::*} to output of sk link "scope raw --listen messages"
+	fake server "raw" subscribes to "message:channel=111111111111111111" and "member-join"
+	wait 300 milliseconds
+	loop subscription refusals of fake server "raw":
+		mark "raw refused: %loop-value%"
+	fire message event in channel "111111111111111111" with text "for raw"
+	wait 300 milliseconds
+	set {_n} to forwarded events of server "raw"
+	mark "raw forwarded: %{_n}%"

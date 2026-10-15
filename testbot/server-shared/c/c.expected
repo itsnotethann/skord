@@ -1,0 +1,2 @@
+rejected /botonly: /botonly is already defined in shared.sk, line 5. Each command can be defined once.
+rejected /who: /who is declared by servers 'a', 'b' (a.sk, line 1) with a different definition than server 'c' (c.sk, line 1). Servers can share a command only when its declaration is identical.

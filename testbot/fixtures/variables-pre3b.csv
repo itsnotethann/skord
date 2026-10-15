@@ -1,0 +1,14 @@
+# === Skript's variable storage ===
+# Please do not modify this file manually!
+#
+# version: 10.0.2
+
+fixture::category, category, 8102696404094079CD1A42AAAA
+fixture::channel, channel, 810269640404A03CE68D215555
+fixture::gone-user, discorduser, 81026964040ACB38C49EA31C71
+fixture::guild, guild, 8102696404018ABEF7846071C7
+fixture::member, member, 82056775696C6404018ABEF7846071C702696404062AFBDE1181C71C
+fixture::permission, discordpermission, 0B42414E5F4D454D42455253
+fixture::role, role, 810269640407B5BAD595E238E3
+fixture::user, discorduser, 810269640403157DEF08C0E38E
+

@@ -21,6 +21,9 @@ import io.github.itsnotethann.skord.bridge.BridgeHost;
 import io.github.itsnotethann.skord.command.CommandSync;
 import io.github.itsnotethann.skord.protocol.Frame;
 import io.github.itsnotethann.skord.event.ReadyEvent;
+import io.github.itsnotethann.skord.discord.Discord;
+import io.github.itsnotethann.skord.jda.JdaDiscord;
+import io.github.itsnotethann.skord.syntax.BridgeSyntax;
 import io.github.itsnotethann.skord.syntax.SkordSyntax;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
@@ -107,6 +110,7 @@ public final class SkordHost implements PlatformProvider {
 		Path directory = Path.of("").toAbsolutePath();
 		SkordHost host = new SkordHost(directory.toFile());
 		instance = host;
+		Discord.install(new JdaDiscord(host.eventBus));
 
 		if (!check) {
 			Path configFile = directory.resolve("skord.yml");
@@ -190,7 +194,10 @@ public final class SkordHost implements PlatformProvider {
 		scriptThread.execute(() -> {
 			try {
 				Skript skript = new Skript();
-				Skript.onRegistration(SkordSyntax::register);
+				Skript.onRegistration(() -> {
+						SkordSyntax.register();
+						BridgeSyntax.register();
+					});
 				Skript.onFinishedLoading(() -> scriptThread.execute(whenLoaded));
 				skript.setEnabled(true);
 				skript.onEnable();

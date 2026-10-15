@@ -5,6 +5,9 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
+import io.github.itsnotethann.skord.discord.MessageRef;
+import io.github.itsnotethann.skord.discord.Responder;
+import io.github.itsnotethann.skord.jda.JdaRefs;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.callbacks.IReplyCallback;
@@ -29,11 +32,11 @@ public final class JdaResponder implements Responder {
 		this.callback = callback;
 	}
 
-	/** The live hook that can edit {@code message}, if it was sent through an interaction. */
-	public static @Nullable InteractionHook hookFor(Message message) {
+	/** The live hook that can edit the message with this ID, if it was sent through an interaction. */
+	public static @Nullable InteractionHook hookFor(long messageId) {
 		InteractionHook hook;
 		synchronized (HOOKED) {
-			hook = HOOKED.get(message.getIdLong());
+			hook = HOOKED.get(messageId);
 		}
 		return hook == null || hook.isExpired() ? null : hook;
 	}
@@ -44,7 +47,7 @@ public final class JdaResponder implements Responder {
 	}
 
 	@Override
-	public CompletionStage<@Nullable Message> reply(String text, boolean ephemeral, boolean wantMessage) {
+	public CompletionStage<@Nullable MessageRef> reply(String text, boolean ephemeral, boolean wantMessage) {
 		return callback.reply(text).setEphemeral(ephemeral).submit().thenCompose(hook -> {
 			if (!wantMessage)
 				return CompletableFuture.completedFuture(null);
@@ -56,12 +59,12 @@ public final class JdaResponder implements Responder {
 	}
 
 	@Override
-	public CompletionStage<@Nullable Message> editOriginal(String text, boolean wantMessage) {
+	public CompletionStage<@Nullable MessageRef> editOriginal(String text, boolean wantMessage) {
 		return callback.getHook().editOriginal(text).submit().thenApply(this::track);
 	}
 
 	@Override
-	public CompletionStage<@Nullable Message> editMessage(String messageId, String text) {
+	public CompletionStage<@Nullable MessageRef> editMessage(String messageId, String text) {
 		return callback.getHook().editMessageById(messageId, text).submit().thenApply(this::track);
 	}
 
@@ -71,14 +74,14 @@ public final class JdaResponder implements Responder {
 	}
 
 	@Override
-	public CompletionStage<@Nullable Message> followUp(String text, boolean ephemeral, boolean wantMessage) {
+	public CompletionStage<@Nullable MessageRef> followUp(String text, boolean ephemeral, boolean wantMessage) {
 		return callback.getHook().sendMessage(text).setEphemeral(ephemeral).submit().thenApply(this::track);
 	}
 
-	private Message track(Message message) {
+	private MessageRef track(Message message) {
 		synchronized (HOOKED) {
 			HOOKED.put(message.getIdLong(), callback.getHook());
 		}
-		return message;
+		return JdaRefs.message(message);
 	}
 }

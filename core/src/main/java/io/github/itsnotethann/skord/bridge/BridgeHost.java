@@ -20,10 +20,17 @@ import org.slf4j.LoggerFactory;
 public final class BridgeHost {
 
 	/** {@code bridge:} in skord.yml. A port of 0 leaves the bridge off. */
-	public record Settings(int port, String bind, long timeoutMillis) {
+	public record Settings(int port, String bind, long timeoutMillis, int heldMaxEvents, long heldMaxAgeMillis,
+						   List<String> routeOrder) {
 
 		public static final long DEFAULT_TIMEOUT_MILLIS = 5_000;
+		public static final int DEFAULT_HELD_MAX_EVENTS = 1_000;
+		public static final long DEFAULT_HELD_MAX_AGE_MILLIS = 7L * 24 * 3_600_000;
 		public static final Settings OFF = new Settings(0, "0.0.0.0", DEFAULT_TIMEOUT_MILLIS);
+
+		public Settings(int port, String bind, long timeoutMillis) {
+			this(port, bind, timeoutMillis, DEFAULT_HELD_MAX_EVENTS, DEFAULT_HELD_MAX_AGE_MILLIS, List.of());
+		}
 	}
 
 	private static final Logger LOGGER = LoggerFactory.getLogger("skord");
@@ -57,7 +64,7 @@ public final class BridgeHost {
 		BridgeRouter router = null;
 		if (settings.port() > 0) {
 			try {
-				router = new BridgeRouter(state.resolve("servers"), script, settings.timeoutMillis());
+				router = new BridgeRouter(state.resolve("servers"), script, settings, links);
 				server = new BridgeServer(new InetSocketAddress(settings.bind(), settings.port()), links, bot, router);
 				router.attach(server);
 				router.restore(links.list().stream().map(LinkStore.Link::name).toList());

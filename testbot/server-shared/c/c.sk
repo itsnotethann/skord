@@ -1,0 +1,9 @@
+slash command who:
+	description: Defined differently from the others
+	trigger:
+		reply with "who from c"
+
+slash command botonly:
+	description: The bot has a script with this name
+	trigger:
+		reply with "never from c"

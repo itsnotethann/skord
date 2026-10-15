@@ -20,6 +20,8 @@ import io.github.itsnotethann.skord.JdaEventBus;
 import io.github.itsnotethann.skord.ScriptThread;
 import io.github.itsnotethann.skord.command.CommandSync;
 import io.github.itsnotethann.skord.event.ReadyEvent;
+import io.github.itsnotethann.skord.discord.Discord;
+import io.github.itsnotethann.skord.syntax.BridgeSyntax;
 import io.github.itsnotethann.skord.syntax.SkordSyntax;
 import org.jetbrains.annotations.Nullable;
 import org.skriptlang.skript.platform.AddonHandle;
@@ -50,11 +52,11 @@ public final class TestBot implements PlatformProvider {
 
 	private final File directory;
 	private final ScriptThread scriptThread;
-	private final JdaEventBus eventBus;
+	private final EventBus eventBus;
 	private final Logger logger = LoggerFactory.getLogger("Skript");
 	private final PlatformEnvironment environment;
 
-	private TestBot(File directory, ScriptThread scriptThread, JdaEventBus eventBus) {
+	TestBot(File directory, ScriptThread scriptThread, EventBus eventBus) {
 		this.directory = directory;
 		this.scriptThread = scriptThread;
 		this.eventBus = eventBus;
@@ -88,16 +90,21 @@ public final class TestBot implements PlatformProvider {
 	public static void main(String[] args) throws Exception {
 		Path scripts = Path.of(args[0]);
 		Path work = Path.of(args[1]);
+		Path serverScripts = args.length > 2 ? Path.of(args[2]) : null;
+		ServerProcess.scripts(serverScripts);
 		List<String> drift = ProtocolDrift.check();
 		if (!drift.isEmpty()) {
 			drift.forEach(problem -> System.out.println("BOTTEST FAIL: " + problem));
 			System.exit(1);
 		}
 		stage(scripts, work);
+		stageVariables(scripts, work);
 
 		ScriptThread scriptThread = new ScriptThread();
 		JdaEventBus eventBus = new JdaEventBus(scriptThread);
 		Platform.install(new TestBot(work.toFile(), scriptThread, eventBus));
+		FakeDiscord.bus(eventBus);
+		Discord.install(FakeDiscord.INSTANCE);
 		CommandSync.install(work.resolve(".skord").resolve("commands.hash"), 0, FakeDiscord.commandSink());
 		TestBridge.start(work, scriptThread);
 
@@ -108,6 +115,7 @@ public final class TestBot implements PlatformProvider {
 				Skript skript = new Skript();
 				Skript.onRegistration(() -> {
 					SkordSyntax.register();
+					BridgeSyntax.register();
 					TestSyntax.register();
 				});
 				Skript.onFinishedLoading(() -> scriptThread.execute(() -> {
@@ -133,13 +141,21 @@ public final class TestBot implements PlatformProvider {
 			System.exit(2);
 		}
 
-		Map<String, Recorder.Expected> expected = readExpected(scripts);
+		Map<String, Recorder.Expected> expected = readExpected(scripts, "");
+		if (serverScripts != null) {
+			expected.putAll(readExpected(serverScripts, "server/"));
+			try (Stream<Path> profiles = Files.list(serverScripts)) {
+				for (Path profile : profiles.filter(Files::isDirectory).sorted().toList())
+					expected.putAll(readExpected(profile, "server/"));
+			}
+		}
 		long deadline = System.currentTimeMillis() + TIMEOUT_MILLIS;
 		while (System.currentTimeMillis() < deadline && !RECORDER.reached(expected))
 			Thread.sleep(50);
 		// Long enough for anything that shouldn't happen (a late deferral, a stray request) to show up.
 		Thread.sleep(SETTLE_MILLIS);
 
+		ServerProcess.stopAll();
 		CountDownLatch disabled = new CountDownLatch(1);
 		scriptThread.execute(() -> {
 			try {
@@ -169,6 +185,15 @@ public final class TestBot implements PlatformProvider {
 			Files.copy(script, target.resolve(script.getFileName()), StandardCopyOption.REPLACE_EXISTING);
 	}
 
+	private static void stageVariables(Path scripts, Path work) throws IOException {
+		Path fixture = scripts.toAbsolutePath().resolveSibling("fixtures").resolve("variables-pre3b.csv");
+		Path target = work.resolve("Skript").resolve("variables.csv");
+		if (Files.exists(fixture)) {
+			Files.createDirectories(target.getParent());
+			Files.copy(fixture, target, StandardCopyOption.REPLACE_EXISTING);
+		}
+	}
+
 	private static void deleteTree(Path root) throws IOException {
 		if (!Files.exists(root))
 			return;
@@ -188,7 +213,7 @@ public final class TestBot implements PlatformProvider {
 		}
 	}
 
-	private static Map<String, Recorder.Expected> readExpected(Path scripts) throws IOException {
+	private static Map<String, Recorder.Expected> readExpected(Path scripts, String prefix) throws IOException {
 		Map<String, Recorder.Expected> expected = new TreeMap<>();
 		for (Path script : scripts(scripts, false)) {
 			String name = script.getFileName().toString();
@@ -204,7 +229,7 @@ public final class TestBot implements PlatformProvider {
 						entry.marks.add(line);
 				}
 			}
-			expected.put(name, entry);
+			expected.put(prefix + name, entry);
 		}
 		return expected;
 	}
@@ -218,6 +243,8 @@ public final class TestBot implements PlatformProvider {
 	public LogSink logSink() {
 		return (level, message, error) -> {
 			RECORDER.log(level, message);
+			if (System.getProperty("skord.testserver") != null)
+				System.out.println("LOG " + level + " " + message);
 			if (level.intValue() >= Level.SEVERE.intValue())
 				logger.error(message, error);
 			else if (level.intValue() >= Level.WARNING.intValue())

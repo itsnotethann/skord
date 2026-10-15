@@ -16,6 +16,8 @@ val uncommon = "1.0.0-alpha.1"
 
 dependencies {
 	api(project(":protocol"))
+	api(project(":discord-api"))
+	api(project(":syntax"))
 	// api: testbot compiles against the engine and JDA through core.
 	api("com.github.itsnotethann.uncommonskript:common:$uncommon")
 	api("net.dv8tion:JDA:6.4.2") {

@@ -1,0 +1,11 @@
+forwarded at start: 0
+forwarded after the subscribed channel: 1
+discord calls: send 1, reply 1, create 1
+forwarded after another channel: 1
+reply: Hello Ada from the server!
+narrowed: Link 'remote' may now: reply.
+discord calls: send 1, reply 2, create 1
+nothing forwarded once the listen word is gone
+refused: 1
+raw refused: member-join: the bot has no event called 'member-join'
+raw forwarded: 1

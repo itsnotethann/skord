@@ -99,6 +99,11 @@ public final class BridgeServer {
 		return true;
 	}
 
+	/** Tells a connected server what its link allows now, so its own view stays current. */
+	public void pushScope(String server) {
+		send(server, new Frame.ScopeUpdate(links.scope(server), links.listen(server)));
+	}
+
 	/** Cuts a server off, telling it why. Used when its link is revoked. */
 	public void drop(String server, String reason) {
 		WebSocket connection = connections.get(server);
@@ -135,7 +140,7 @@ public final class BridgeServer {
 			previous.send(FrameCodec.encode(new Frame.Denied(Frame.Denied.REPLACED)));
 			previous.close(1000, "replaced");
 		}
-		connection.send(FrameCodec.encode(new Frame.Welcome(bot.get(), HEARTBEAT_MILLIS)));
+		connection.send(FrameCodec.encode(new Frame.Welcome(bot.get(), HEARTBEAT_MILLIS, links.scope(server))));
 		LOGGER.info("Bridge: server '{}' connected ({})", server, hello.platform());
 		listener.connected(server, hello.platform());
 	}

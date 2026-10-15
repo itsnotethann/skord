@@ -1,0 +1,10 @@
+ready
+send ok
+reply ok
+created from-server
+scope now: reply; listen: messages
+send failed: out of scope, missing scope send
+reply ok
+create failed: out of scope, missing scope channels
+scope now: reply; listen: none
+refused message: this link may not listen to messages; allow it with: sk link scope remote --listen messages

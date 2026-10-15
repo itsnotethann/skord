@@ -1,0 +1,90 @@
+# Scopes, presence and players over the real bridge. Server "arena" belongs to this script alone: the others share the bot.
+
+on server connect:
+	if event-server is "arena":
+		if event-time is set:
+			mark "connect event: arena, with a time"
+
+on server disconnect:
+	if event-server is "arena":
+		if event-time is set:
+			mark "disconnect event: arena, with a time"
+
+on ready:
+	if server "arena" is online:
+		mark "arena online before connecting"
+	else:
+		mark "arena offline before connecting"
+	if last seen of server "arena" is set:
+		mark "arena has a last seen before connecting"
+	else:
+		mark "arena has no last seen yet"
+
+	# A scope word outside the vocabulary is an error, and nothing is created.
+	set {_bad::*} to output of sk link "create arena-bad --allow send,banana"
+	mark "bad scope: %{_bad::1}%"
+	set {_none::*} to output of sk link "scope arena --allow send"
+	mark "scope of a link that does not exist: %{_none::1}%"
+
+	# Linked with a scope: the server is granted it in welcome, and sk link list shows it.
+	connect fake server "arena" allowing "send,reply"
+	wait 100 milliseconds
+	mark "granted: %granted scope of fake server "arena"%"
+	loop output of sk link "list":
+		if loop-value partially matches "arena  [(]connected":
+			if loop-value partially matches "scope: send, reply":
+				mark "list: arena connected with scope send, reply"
+		if loop-value partially matches "arena-bad":
+			mark "arena-bad was created anyway"
+	if server "arena" is online:
+		mark "arena online after connecting"
+	loop online servers:
+		if loop-value is "arena":
+			mark "arena is among the online servers"
+	loop all linked servers:
+		if loop-value is "arena":
+			mark "arena is among the linked servers"
+
+	# Changing the scope is stored at once.
+	set {_changed::*} to output of sk link "scope arena --allow call"
+	mark "changed: %{_changed::1}%"
+	loop output of sk link "list":
+		if loop-value partially matches "arena  [(]":
+			if loop-value partially matches "scope: call":
+				mark "list: arena now has scope call"
+
+	# Players: deltas debounce, and a join and quit inside the window is never sent.
+	fake server "arena" reports player "Ada" joining
+	fake server "arena" reports player "Grace" joining
+	fake server "arena" reports player "Zed" joining
+	fake server "arena" reports player "Zed" leaving
+	wait 700 milliseconds
+	set {_p::*} to known players of server "arena"
+	mark "players after joins: %{_p::*}% (%size of {_p::*}%)"
+	fake server "arena" reports player "Linus" joining
+	fake server "arena" reports player "Ada" leaving
+	wait 700 milliseconds
+	set {_p::*} to known players of server "arena"
+	mark "players after a delta: %{_p::*}% (%size of {_p::*}%)"
+
+	# Going away empties the roster and records when; a restart of the bot keeps the time.
+	disconnect fake server "arena"
+	wait 200 milliseconds
+	if server "arena" is online:
+		mark "arena still online after disconnecting"
+	else:
+		mark "arena offline after disconnecting"
+	if last seen of server "arena" is set:
+		mark "last seen set while arena is down"
+	set {_p::*} to known players of server "arena"
+	mark "players while down: %size of {_p::*}%"
+	simulate a bot restart
+	if last seen of server "arena" is set:
+		mark "last seen survives a bot restart"
+
+	# Reconnecting sends a snapshot of whoever is still on.
+	connect fake server "arena" allowing "send"
+	wait 700 milliseconds
+	set {_p::*} to known players of server "arena"
+	mark "players after reconnect: %{_p::*}% (%size of {_p::*}%)"
+	disconnect fake server "arena"

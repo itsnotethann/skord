@@ -18,6 +18,12 @@ import org.jetbrains.annotations.Nullable;
 public record CommandSpec(List<String> path, String description, EnumSet<DiscordPermission> permissions,
 						  boolean guildOnly, List<Option> options, String script, int line, boolean implicit) {
 
+	/** Whether two specs declare the same command, ignoring where each was written. */
+	public boolean sameDefinition(CommandSpec other) {
+		return path.equals(other.path) && description.equals(other.description) && permissions.equals(other.permissions)
+			&& guildOnly == other.guildOnly && options.equals(other.options);
+	}
+
 	public String name() {
 		return String.join(" ", path);
 	}

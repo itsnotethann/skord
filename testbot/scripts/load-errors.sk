@@ -11,3 +11,7 @@ slash command order:
 	arguments:
 		first: text? "Optional"
 		second: text "Required, after an optional one"
+
+# Held is only for events with a stable id; a message has none.
+on message received (held):
+	mark "never runs"

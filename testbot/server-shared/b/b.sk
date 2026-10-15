@@ -1,0 +1,4 @@
+slash command who:
+	description: Says which server answered
+	trigger:
+		reply with "who from b"

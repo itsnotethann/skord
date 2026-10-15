@@ -10,7 +10,7 @@ reply ephemerally: The server 'survival' is offline right now.
 republished: requests 2
 reply: Hello Grace!
 revoked: requests 3, synced <none>
-rejections: hello: /hello is already defined in server 'survival', fake.sk. Each command can be defined once.
+rejections: hello: /hello is declared by server 'survival' (fake.sk) with a different definition than server 'creative' (fake.sk). Servers can share a command only when its declaration is identical.
 reply: Built
 defer
 delete original

@@ -2,14 +2,22 @@ package io.github.itsnotethann.skord.bridge.api;
 
 import java.net.URI;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.logging.Level;
 
 import com.google.gson.JsonElement;
@@ -18,7 +26,9 @@ import io.github.itsnotethann.skord.protocol.BridgeClient;
 import io.github.itsnotethann.skord.protocol.CommandSpec;
 import io.github.itsnotethann.skord.protocol.Frame;
 import io.github.itsnotethann.skord.protocol.FrameCodec;
+import io.github.itsnotethann.skord.protocol.Listen;
 import io.github.itsnotethann.skord.protocol.Ref;
+import io.github.itsnotethann.skord.protocol.Scope;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -48,6 +58,12 @@ public final class Bridge implements AutoCloseable {
 
 		/** The bot took the declared commands except these, which clash with another owner's or are invalid. */
 		default void onCommandsRejected(List<Frame.CommandsResult.Rejection> rejected) {}
+
+		/** The bot would not forward these events: outside what its operator allowed this server to listen to. */
+		default void onSubscriptionsRejected(List<Frame.SubscribeResult.Rejection> rejected) {}
+
+		/** The bot changed this server's scope while it was connected. */
+		default void onScopeChanged(Set<Scope> scope, Set<Listen> listen) {}
 	}
 
 	private final BridgePlatform platform;
@@ -55,13 +71,28 @@ public final class Bridge implements AutoCloseable {
 	private final BridgeClient client;
 	private final List<ConnectionListener> listeners = new CopyOnWriteArrayList<>();
 	private final Map<String, CompletableFuture<Frame.Result>> pending = new ConcurrentHashMap<>();
-	private final Map<String, CompletableFuture<Frame.Response>> asks = new ConcurrentHashMap<>();
-	private final Map<String, MessageHandler> messageHandlers = new ConcurrentHashMap<>();
-	private final Map<String, RequestHandler> requestHandlers = new ConcurrentHashMap<>();
+	private final Map<String, CompletableFuture<Frame.CallResult>> asks = new ConcurrentHashMap<>();
+	private final Map<String, FunctionHandler> functions = new ConcurrentHashMap<>();
+	private final Map<String, Frame.Players.Player> online = new LinkedHashMap<>();
+	private final Map<String, Frame.Players.Player> joinedPending = new LinkedHashMap<>();
+	private final Map<String, Frame.Players.Player> leftPending = new LinkedHashMap<>();
+	private final ScheduledExecutorService timers = Executors.newSingleThreadScheduledExecutor(runnable -> {
+		Thread thread = new Thread(runnable, "skord-bridge-players");
+		thread.setDaemon(true);
+		return thread;
+	});
+	private ScheduledFuture<?> flush;
+	private final List<Function<Frame.Event, CompletionStage<?>>> eventHandlers = new CopyOnWriteArrayList<>();
+	private volatile Set<Scope> scope = EnumSet.noneOf(Scope.class);
+	private volatile Set<Listen> listen = EnumSet.noneOf(Listen.class);
 	private volatile Map<String, Command> commands = Map.of();
 	private volatile boolean declared;
+	private volatile List<Frame.EventSpec> subscriptions = List.of();
+	private volatile boolean subscribed;
 	private volatile State state = State.CONNECTING;
 	private volatile @Nullable Frame.BotInfo bot;
+
+	static final long PLAYER_DEBOUNCE_MILLIS = 250;
 
 	private Bridge(BridgeConfig config, BridgePlatform platform) {
 		this.platform = platform;
@@ -74,7 +105,14 @@ public final class Bridge implements AutoCloseable {
 
 	/** Connects in the background and returns at once. */
 	public static Bridge start(BridgeConfig config, BridgePlatform platform) {
+		return start(config, platform, new ConnectionListener[0]);
+	}
+
+	/** As {@link #start(BridgeConfig, BridgePlatform)}, with listeners in place before the first connect. */
+	public static Bridge start(BridgeConfig config, BridgePlatform platform, ConnectionListener... initial) {
 		Bridge bridge = new Bridge(config, platform);
+		for (ConnectionListener listener : initial)
+			bridge.listeners.add(listener);
 		platform.log(Level.INFO, "Bridge: connecting to " + config.url() + " as '" + config.name() + "'");
 		bridge.client.start();
 		return bridge;
@@ -110,7 +148,7 @@ public final class Bridge implements AutoCloseable {
 		Map<String, Command> byName = new LinkedHashMap<>();
 		for (Command command : declared)
 			byName.put(command.spec().name(), command);
-		this.commands = Map.copyOf(byName);
+		this.commands = java.util.Collections.unmodifiableMap(byName);
 		this.declared = true;
 		publishCommands();
 	}
@@ -121,34 +159,58 @@ public final class Bridge implements AutoCloseable {
 		client.send(new Frame.Commands(commands.values().stream().map(Command::spec).toList()));
 	}
 
-	/** Runs {@code handler} for each message the bot sends under {@code name}, replacing any earlier one. */
-	public void onMessage(String name, MessageHandler handler) {
-		messageHandlers.put(name, handler);
+	/**
+	 * Declares the Discord events this server's scripts handle, replacing any declared before. Re-sent after every
+	 * reconnect. The bot answers with the ones it refused, which {@link ConnectionListener#onSubscriptionsRejected}
+	 * reports; the rest apply.
+	 */
+	public void subscribe(List<Frame.EventSpec> events) {
+		this.subscriptions = List.copyOf(events);
+		this.subscribed = true;
+		publishSubscriptions();
 	}
 
-	public void removeMessageHandler(String name) {
-		messageHandlers.remove(name);
-	}
-
-	/** Answers the bot's requests named {@code name}, replacing any earlier handler. */
-	public void onRequest(String name, RequestHandler handler) {
-		requestHandlers.put(name, handler);
-	}
-
-	public void removeRequestHandler(String name) {
-		requestHandlers.remove(name);
-	}
-
-	/** Sends the bot a named message. Returns false, and sends nothing, if the bridge isn't connected. */
-	public boolean send(String name, JsonElement data) {
-		return state == State.CONNECTED && client.send(new Frame.Message(name, data));
+	private void publishSubscriptions() {
+		if (!subscribed || state != State.CONNECTED)
+			return;
+		client.send(new Frame.Subscribe(subscriptions));
 	}
 
 	/**
-	 * Asks the bot and completes with its answer. Fails with a {@link BridgeRequestException} if the bridge isn't
-	 * connected ({@code offline}), the bot has no answer ({@code refused}), or it doesn't answer within the
-	 * configured timeout ({@code timed out}).
+	 * Runs the handler on the main thread for every event the bot forwards. The event is acknowledged once every
+	 * handler has returned and the stage each returned (null counts as done) has completed.
 	 */
+	public void onEvent(Function<Frame.Event, CompletionStage<?>> handler) {
+		eventHandlers.add(handler);
+	}
+
+	/** Asks the bot to act on Discord. Fails with a {@link BridgeRequestException} carrying the bot's error. */
+	public CompletionStage<Frame.Result> action(String kind, JsonObject args) {
+		String id = UUID.randomUUID().toString();
+		return request(id, new Frame.Action(id, kind, args));
+	}
+
+	public Set<Listen> listen() {
+		return Set.copyOf(listen);
+	}
+
+	public void onCall(String name, FunctionHandler handler) {
+		functions.put(name, handler);
+	}
+
+	public void removeCall(String name) {
+		functions.remove(name);
+	}
+
+	public Set<Scope> scope() {
+		return Set.copyOf(scope);
+	}
+
+	public boolean send(String name, JsonElement data) {
+		return state == State.CONNECTED
+			&& client.send(new Frame.Call(UUID.randomUUID().toString(), name, data, false));
+	}
+
 	public CompletionStage<JsonElement> ask(String name, JsonElement data) {
 		CompletableFuture<JsonElement> answer = new CompletableFuture<>();
 		if (state != State.CONNECTED) {
@@ -156,9 +218,9 @@ public final class Bridge implements AutoCloseable {
 			return answer;
 		}
 		String id = UUID.randomUUID().toString();
-		CompletableFuture<Frame.Response> reply = new CompletableFuture<>();
+		CompletableFuture<Frame.CallResult> reply = new CompletableFuture<>();
 		asks.put(id, reply);
-		if (!client.send(new Frame.Request(id, name, data))) {
+		if (!client.send(new Frame.Call(id, name, data, true))) {
 			asks.remove(id);
 			answer.completeExceptionally(new BridgeRequestException("offline", "The bridge isn't connected to the bot", 0));
 			return answer;
@@ -179,31 +241,79 @@ public final class Bridge implements AutoCloseable {
 		return answer;
 	}
 
-	private void answerRequest(Frame.Request request) {
-		RequestHandler handler = requestHandlers.get(request.name());
+	public void playerJoined(String uuid, String name) {
+		changePlayer(new Frame.Players.Player(uuid, name), true);
+	}
+
+	public void playerLeft(String uuid, String name) {
+		changePlayer(new Frame.Players.Player(uuid, name), false);
+	}
+
+	private synchronized void changePlayer(Frame.Players.Player player, boolean joined) {
+		String key = player.uuid();
+		boolean changed = joined ? online.put(key, player) == null : online.remove(key) != null;
+		if (!changed)
+			return;
+		if (joined) {
+			if (leftPending.remove(key) == null)
+				joinedPending.put(key, player);
+		} else if (joinedPending.remove(key) == null) {
+			leftPending.put(key, player);
+		}
+		if (state == State.CONNECTED && flush == null && !timers.isShutdown())
+			flush = timers.schedule(this::flushPlayers, PLAYER_DEBOUNCE_MILLIS, TimeUnit.MILLISECONDS);
+	}
+
+	private synchronized void flushPlayers() {
+		flush = null;
+		if (state != State.CONNECTED || joinedPending.isEmpty() && leftPending.isEmpty())
+			return;
+		client.send(new Frame.Players(false, new ArrayList<>(joinedPending.values()), new ArrayList<>(leftPending.values())));
+		joinedPending.clear();
+		leftPending.clear();
+	}
+
+	private synchronized void sendSnapshot() {
+		if (flush != null) {
+			flush.cancel(false);
+			flush = null;
+		}
+		joinedPending.clear();
+		leftPending.clear();
+		client.send(new Frame.Players(true, new ArrayList<>(online.values()), List.of()));
+	}
+
+	private void handleCall(Frame.Call call) {
+		FunctionHandler handler = functions.get(call.function());
 		if (handler == null) {
-			client.send(new Frame.Response(request.id(), com.google.gson.JsonNull.INSTANCE, new Frame.Result.Failure(
-				"no-handler", "This server has no answer for '" + request.name() + "'", 0)));
+			if (call.waiting())
+				client.send(new Frame.CallResult(call.id(), com.google.gson.JsonNull.INSTANCE, new Frame.Result.Failure(
+					"no-handler", "This server has no function '" + call.function() + "'", 0)));
 			return;
 		}
 		platform.runOnMain(() -> {
 			CompletionStage<JsonElement> pending;
 			try {
-				pending = handler.handle(request.data());
+				pending = handler.handle(call.args());
 			} catch (RuntimeException e) {
-				platform.log(Level.SEVERE, "Bridge: request '" + request.name() + "' failed: " + e);
+				platform.log(Level.SEVERE, "Bridge: function '" + call.function() + "' failed: " + e);
 				pending = CompletableFuture.failedFuture(e);
 			}
 			if (pending == null)
 				pending = CompletableFuture.completedFuture(com.google.gson.JsonNull.INSTANCE);
 			pending.whenComplete((data, error) -> {
+				if (!call.waiting()) {
+					if (error != null)
+						platform.log(Level.WARNING, "Bridge: function '" + call.function() + "' failed: " + error);
+					return;
+				}
 				if (error != null) {
 					Throwable cause = error instanceof java.util.concurrent.CompletionException && error.getCause() != null
 						? error.getCause() : error;
-					client.send(new Frame.Response(request.id(), com.google.gson.JsonNull.INSTANCE,
+					client.send(new Frame.CallResult(call.id(), com.google.gson.JsonNull.INSTANCE,
 						new Frame.Result.Failure("error", String.valueOf(cause.getMessage()), 0)));
 				} else {
-					client.send(new Frame.Response(request.id(), data, null));
+					client.send(new Frame.CallResult(call.id(), data, null));
 				}
 			});
 		});
@@ -213,12 +323,14 @@ public final class Bridge implements AutoCloseable {
 	public void close() {
 		state = State.CLOSED;
 		bot = null;
+		scope = EnumSet.noneOf(Scope.class);
 		failPending("closed");
+		timers.shutdownNow();
 		client.close();
 	}
 
 	private void failPending(String reason) {
-		for (Map.Entry<String, CompletableFuture<Frame.Response>> entry : asks.entrySet()) {
+		for (Map.Entry<String, CompletableFuture<Frame.CallResult>> entry : asks.entrySet()) {
 			if (asks.remove(entry.getKey(), entry.getValue()))
 				entry.getValue().completeExceptionally(new BridgeRequestException("offline",
 					"The bridge was " + reason + " before the bot answered", 0));
@@ -257,7 +369,7 @@ public final class Bridge implements AutoCloseable {
 				Frame.Result.Failure failure = result.error();
 				throw failure == null
 					? new BridgeRequestException("error", "The bot refused the request", 0)
-					: new BridgeRequestException(failure.type(), failure.message(), failure.code());
+					: new BridgeRequestException(failure.type(), failure.message(), failure.code(), failure.scope());
 			}
 			return result;
 		});
@@ -329,6 +441,11 @@ public final class Bridge implements AutoCloseable {
 		public CompletionStage<String> followUp(String text, boolean ephemeral) {
 			return respond(Frame.Respond.Action.FOLLOW_UP, text, ephemeral, null);
 		}
+
+		@Override
+		public CompletionStage<Void> deleteOriginal() {
+			return respond(Frame.Respond.Action.DELETE, null, false, null).thenApply(result -> null);
+		}
 	}
 
 	// Values arrive as JSON; the declared type decides whether 3 is an integer or a number.
@@ -385,9 +502,12 @@ public final class Bridge implements AutoCloseable {
 			if (state == State.CLOSED)
 				return;
 			bot = welcome.bot();
+			scope = welcome.scope().isEmpty() ? EnumSet.noneOf(Scope.class) : EnumSet.copyOf(welcome.scope());
 			state = State.CONNECTED;
 			platform.log(Level.INFO, "Bridge: connected to " + welcome.bot().name());
 			publishCommands();
+			publishSubscriptions();
+			sendSnapshot();
 			platform.runOnMain(() -> listeners.forEach(listener -> listener.onConnect(welcome.bot())));
 		}
 
@@ -408,14 +528,39 @@ public final class Bridge implements AutoCloseable {
 						future.complete(result);
 				}
 				case Frame.Interaction interaction -> interaction(interaction);
-				case Frame.Message message -> {
-					MessageHandler handler = messageHandlers.get(message.name());
-					if (handler != null)
-						platform.runOnMain(() -> handler.handle(message.data()));
+				case Frame.Call call -> handleCall(call);
+				case Frame.Event event -> platform.runOnMain(() -> {
+					List<CompletableFuture<?>> running = new ArrayList<>();
+					for (Function<Frame.Event, CompletionStage<?>> handler : eventHandlers) {
+						try {
+							CompletionStage<?> stage = handler.apply(event);
+							if (stage != null)
+								running.add(stage.toCompletableFuture());
+						} catch (RuntimeException e) {
+							platform.log(Level.SEVERE, "Bridge: handling a " + event.kind() + " event failed: " + e);
+						}
+					}
+					CompletableFuture.allOf(running.toArray(new CompletableFuture<?>[0]))
+						.whenComplete((ignored, error) -> client.send(new Frame.EventAck(event.id())));
+				});
+				case Frame.SubscribeResult result -> {
+					if (!result.rejected().isEmpty()) {
+						for (Frame.SubscribeResult.Rejection rejection : result.rejected())
+							platform.log(Level.WARNING, "Bridge: the bot will not forward '" + rejection.kind()
+								+ "' events: " + rejection.reason());
+						platform.runOnMain(() -> listeners.forEach(listener ->
+							listener.onSubscriptionsRejected(result.rejected())));
+					}
 				}
-				case Frame.Request request -> answerRequest(request);
-				case Frame.Response response -> {
-					CompletableFuture<Frame.Response> future = asks.remove(response.id());
+				case Frame.ScopeUpdate update -> {
+					scope = update.scope().isEmpty() ? EnumSet.noneOf(Scope.class) : EnumSet.copyOf(update.scope());
+					listen = update.listen().isEmpty() ? EnumSet.noneOf(Listen.class) : EnumSet.copyOf(update.listen());
+					platform.log(Level.INFO, "Bridge: the bot changed this server's scope");
+					platform.runOnMain(() -> listeners.forEach(listener ->
+						listener.onScopeChanged(update.scope(), update.listen())));
+				}
+				case Frame.CallResult response -> {
+					CompletableFuture<Frame.CallResult> future = asks.remove(response.id());
 					if (future != null)
 						future.complete(response);
 				}

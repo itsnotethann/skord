@@ -3,7 +3,7 @@ plugins {
 }
 
 rootProject.name = "skord"
-include("core", "protocol", "bridge-api", "testbot")
+include("core", "protocol", "bridge-api", "discord-api", "syntax", "testbot")
 
 // A sibling uncommon checkout substitutes the engine from source, so engine changes need no publish.
 // Without one, the JitPack coordinates in core/build.gradle.kts resolve normally.

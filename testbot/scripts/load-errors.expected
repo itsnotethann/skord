@@ -1,3 +1,4 @@
 ! /alpha is already defined in commands-target.sk
 ! 'Bad' isn't a valid command name
 ! Required argument 'second' comes after an optional one
+! '(held)' isn't allowed on 'message' events

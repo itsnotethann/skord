@@ -38,7 +38,8 @@ public final class Console {
 		  sk enable <script>         enable and load a disabled script
 		  sk disable <script>        unload a script and disable it
 		  sk list                    list loaded and disabled scripts
-		  sk link create <server>    allow a game server to connect; prints its secret once
+		  sk link create <server> [--allow a,b]  allow a game server to connect; prints its secret once
+		  sk link scope <server> --allow a,b     change what a server may do, at once
 		  sk link revoke <server>    cut a server off and forget its secret
 		  sk link list               list linked servers and whether they are connected
 		  stop                       shut down""";

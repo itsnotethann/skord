@@ -1,0 +1,10 @@
+queued while away: 2
+queued after the restart: 3
+queued after delivery: 0
+queued after a missing ack: 1
+queued after the redelivery: 0
+queued after the mid-handler death: 0
+kept: test:12, test:13, test:14, test:15 and test:16
+logged: dropped event test:10 (test-boost) because the queue is past bridge.held.max-events (5)
+logged: dropped event test:11 (test-boost) because the queue is past bridge.held.max-events (5)
+queued at the end: 0

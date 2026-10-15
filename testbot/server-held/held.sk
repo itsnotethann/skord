@@ -1,0 +1,14 @@
+# The server side of the held-event run. Each boost marks its id and whether it is a redelivery.
+
+on test boost (held):
+	set {_n} to boost number
+	if event is redelivered:
+		mark "boost %{_n}% %event id% redelivered"
+	else:
+		mark "boost %{_n}% %event id% first"
+	if {_n} is "5":
+		if event is not redelivered:
+			withhold the event ack
+	if {_n} is "6":
+		wait for gate "g"
+		mark "boost 6 finished"

@@ -58,7 +58,7 @@ public final class FrameCodec {
 				if (bot == null)
 					throw new FrameException("welcome has no bot");
 				yield new Frame.Welcome(new Frame.BotInfo(string(bot, "id"), string(bot, "name")),
-					object.has("heartbeat") ? object.get("heartbeat").getAsLong() : 15_000);
+					object.has("heartbeat") ? object.get("heartbeat").getAsLong() : 15_000, scopes(object));
 			}
 			case "denied" -> new Frame.Denied(string(object, "reason"));
 			case "commands" -> {
@@ -98,29 +98,123 @@ public final class FrameCodec {
 			}
 			case "dispatched" -> new Frame.Dispatched(string(object, "interaction"),
 				object.has("paused") && object.get("paused").getAsBoolean());
-			case "result" -> {
-				Frame.Result.Failure failure = null;
-				if (object.has("error") && object.get("error").isJsonObject()) {
-					com.google.gson.JsonObject error = object.getAsJsonObject("error");
-					failure = new Frame.Result.Failure(string(error, "type"), string(error, "message"),
-						error.has("code") ? error.get("code").getAsInt() : 0);
+			case "result" -> new Frame.Result(string(object, "id"),
+				object.has("ok") && object.get("ok").getAsBoolean(),
+				object.has("message") ? object.get("message").getAsString() : null, failure(object),
+				object.has("data") ? object.get("data") : null);
+			case "subscribe-result" -> {
+				List<Frame.SubscribeResult.Rejection> rejected = new ArrayList<>();
+				for (JsonElement entry : array(object, "rejected")) {
+					if (entry.isJsonObject())
+						rejected.add(new Frame.SubscribeResult.Rejection(string(entry.getAsJsonObject(), "kind"),
+							string(entry.getAsJsonObject(), "reason")));
 				}
-				yield new Frame.Result(string(object, "id"), object.has("ok") && object.get("ok").getAsBoolean(),
-					object.has("message") ? object.get("message").getAsString() : null, failure);
+				yield new Frame.SubscribeResult(List.copyOf(rejected));
 			}
-			case "message" -> new Frame.Message(string(object, "name"), data(object));
-			case "request" -> new Frame.Request(string(object, "id"), string(object, "name"), data(object));
-			case "response" -> {
-				Frame.Result.Failure failure = null;
-				if (object.has("error") && object.get("error").isJsonObject()) {
-					JsonObject error = object.getAsJsonObject("error");
-					failure = new Frame.Result.Failure(string(error, "type"), string(error, "message"),
-						error.has("code") ? error.get("code").getAsInt() : 0);
+			case "scope" -> new Frame.ScopeUpdate(scopes(object), listens(object));
+			case "subscribe" -> {
+				List<Frame.EventSpec> events = new ArrayList<>();
+				for (JsonElement entry : array(object, "events")) {
+					if (!entry.isJsonObject())
+						continue;
+					JsonObject spec = entry.getAsJsonObject();
+					events.add(new Frame.EventSpec(string(spec, "kind"),
+						spec.has("filters") && spec.get("filters").isJsonObject()
+							? spec.getAsJsonObject("filters") : new JsonObject(),
+						spec.has("held") && spec.get("held").getAsBoolean()));
 				}
-				yield new Frame.Response(string(object, "id"), data(object), failure);
+				yield new Frame.Subscribe(List.copyOf(events));
 			}
+			case "event" -> new Frame.Event(string(object, "id"), string(object, "kind"), data(object),
+				object.has("redelivery") && object.get("redelivery").getAsBoolean());
+			case "event-ack" -> new Frame.EventAck(string(object, "id"));
+			case "action" -> new Frame.Action(string(object, "id"), string(object, "kind"),
+				object.has("args") && object.get("args").isJsonObject()
+					? object.getAsJsonObject("args") : new JsonObject());
+			case "functions" -> {
+				List<Frame.FunctionSpec> functions = new ArrayList<>();
+				for (JsonElement entry : array(object, "functions")) {
+					if (!entry.isJsonObject())
+						continue;
+					JsonObject function = entry.getAsJsonObject();
+					List<Frame.FunctionSpec.Parameter> parameters = new ArrayList<>();
+					for (JsonElement item : array(function, "parameters")) {
+						if (item.isJsonObject())
+							parameters.add(new Frame.FunctionSpec.Parameter(string(item.getAsJsonObject(), "name"),
+								string(item.getAsJsonObject(), "type")));
+					}
+					functions.add(new Frame.FunctionSpec(string(function, "name"), List.copyOf(parameters),
+						function.has("returns") ? function.get("returns").getAsString() : null));
+				}
+				yield new Frame.Functions(List.copyOf(functions));
+			}
+			case "call" -> new Frame.Call(string(object, "id"), string(object, "function"), args(object),
+				object.has("wait") && object.get("wait").getAsBoolean());
+			case "call-result" -> new Frame.CallResult(string(object, "id"), data(object), failure(object));
+			case "players" -> new Frame.Players(object.has("snapshot") && object.get("snapshot").getAsBoolean(),
+				players(object, "joined"), players(object, "left"));
 			default -> new Frame.Unknown(type, object);
 		};
+	}
+
+	private static JsonElement args(JsonObject object) {
+		JsonElement value = object.get("args");
+		return value == null ? com.google.gson.JsonNull.INSTANCE : value;
+	}
+
+	private static JsonArray array(JsonObject object, String key) {
+		JsonElement value = object.get(key);
+		return value != null && value.isJsonArray() ? value.getAsJsonArray() : new JsonArray();
+	}
+
+	private static List<String> names(JsonObject object, String key) {
+		List<String> out = new ArrayList<>();
+		for (JsonElement entry : array(object, key)) {
+			if (entry.isJsonPrimitive())
+				out.add(entry.getAsString());
+		}
+		return List.copyOf(out);
+	}
+
+	private static List<Frame.Players.Player> players(JsonObject object, String key) {
+		List<Frame.Players.Player> out = new ArrayList<>();
+		for (JsonElement entry : array(object, key)) {
+			if (!entry.isJsonObject())
+				continue;
+			JsonObject player = entry.getAsJsonObject();
+			if (player.has("uuid") && player.has("name"))
+				out.add(new Frame.Players.Player(player.get("uuid").getAsString(), player.get("name").getAsString()));
+		}
+		return List.copyOf(out);
+	}
+
+	private static java.util.Set<Scope> scopes(JsonObject object) {
+		java.util.Set<Scope> out = java.util.EnumSet.noneOf(Scope.class);
+		for (String word : names(object, "scope")) {
+			Scope scope = Scope.of(word);
+			if (scope != null)
+				out.add(scope);
+		}
+		return out;
+	}
+
+	private static java.util.Set<Listen> listens(JsonObject object) {
+		java.util.Set<Listen> out = java.util.EnumSet.noneOf(Listen.class);
+		for (String word : names(object, "listen")) {
+			Listen listen = Listen.of(word);
+			if (listen != null)
+				out.add(listen);
+		}
+		return out;
+	}
+
+	private static Frame.Result.Failure failure(JsonObject object) throws FrameException {
+		if (!object.has("error") || !object.get("error").isJsonObject())
+			return null;
+		JsonObject error = object.getAsJsonObject("error");
+		return new Frame.Result.Failure(string(error, "type"), string(error, "message"),
+			error.has("code") ? error.get("code").getAsInt() : 0,
+			error.has("scope") && !error.get("scope").isJsonNull() ? error.get("scope").getAsString() : null);
 	}
 
 	private static JsonElement data(JsonObject object) {

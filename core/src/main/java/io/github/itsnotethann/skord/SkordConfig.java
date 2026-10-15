@@ -120,8 +120,41 @@ public record SkordConfig(String token, EnumSet<GatewayIntent> intents, long dev
 				if (timeout < 500)
 					throw new IllegalStateException("bridge.timeout in " + file + " must be at least 0.5 seconds");
 			}
-			bridge = new BridgeHost.Settings(port, bind, timeout);
+			int heldMax = BridgeHost.Settings.DEFAULT_HELD_MAX_EVENTS;
+			long heldAge = BridgeHost.Settings.DEFAULT_HELD_MAX_AGE_MILLIS;
+			if (section.get("held") instanceof Map<?, ?> held) {
+				if (held.get("max-events") != null) {
+					String value = String.valueOf(held.get("max-events")).trim();
+					if (!value.matches("\\d{1,7}") || Integer.parseInt(value) < 1)
+						throw new IllegalStateException("bridge.held.max-events in " + file
+							+ " must be a whole number of at least 1, not '" + value + "'");
+					heldMax = Integer.parseInt(value);
+				}
+				if (held.get("max-age") != null)
+					heldAge = duration(file, "bridge.held.max-age", String.valueOf(held.get("max-age")).trim());
+			}
+			List<String> order = new ArrayList<>();
+			if (section.get("route-order") instanceof List<?> names) {
+				for (Object name : names)
+					order.add(String.valueOf(name).trim());
+			}
+			bridge = new BridgeHost.Settings(port, bind, timeout, heldMax, heldAge, List.copyOf(order));
 		}
 		return new SkordConfig(token, intents, devGuild, bridge);
+	}
+
+	private static long duration(Path file, String key, String value) {
+		java.util.regex.Matcher match = java.util.regex.Pattern.compile("(\\d+)\\s*([smhd]?)").matcher(value);
+		if (!match.matches())
+			throw new IllegalStateException(key + " in " + file + " must be a duration such as 90s, 30m, 12h or 7d, not '"
+				+ value + "'");
+		long amount = Long.parseLong(match.group(1));
+		long unit = switch (match.group(2)) {
+			case "m" -> 60_000L;
+			case "h" -> 3_600_000L;
+			case "d" -> 86_400_000L;
+			default -> 1_000L;
+		};
+		return amount * unit;
 	}
 }

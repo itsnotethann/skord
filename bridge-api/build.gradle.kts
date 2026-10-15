@@ -12,6 +12,7 @@ repositories {
 // The one API a game-server consumer codes against. No Skript, no JDA, no server platform.
 dependencies {
 	api(project(":protocol"))
+	api(project(":discord-api"))
 	compileOnly("org.jetbrains:annotations:26.0.2")
 }
 

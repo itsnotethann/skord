@@ -1,0 +1,16 @@
+user id: 222222222222222222
+guild id: 111111111111111111
+channel id: 333333333333333333
+member id: 444444444444444444
+member guild id: 111111111111111111
+role id: 555555555555555555
+category id: 666666666666666666
+permission: Ban Members
+member mention: <@444444444444444444>
+channel mention: <#333333333333333333>
+sent: hello
+fetched name: fake-222222222222222222
+fetched roles: 1
+gone fetch: Unknown User
+gone type: unknown user
+nothing stored
