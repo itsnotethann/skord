@@ -9,3 +9,5 @@ include("core", "protocol", "bridge-api", "discord-api", "syntax", "testbot")
 // Without one, the JitPack coordinates in core/build.gradle.kts resolve normally.
 if (file("../uncommon/settings.gradle.kts").exists())
 	includeBuild("../uncommon")
+else if (file("uncommon/settings.gradle.kts").exists())
+	includeBuild("uncommon")

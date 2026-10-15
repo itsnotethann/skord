@@ -1,0 +1,3 @@
+[submodule "uncommon"]
+	path = uncommon
+	url = https://github.com/itsnotethann/uncommon-skript
