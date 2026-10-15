@@ -1,0 +1,21 @@
+published: requests 2, synced boom, hello, quiet and slow
+reply: Hello Ada!
+defer
+edit original: Done waiting
+reply ephemerally: Something went wrong running that command.
+reply ephemerally: The server 'survival' is offline right now.
+offline: requests 2, synced boom, hello, quiet and slow
+restarted: requests 2, synced boom, hello, quiet and slow
+reply ephemerally: The server 'survival' is offline right now.
+republished: requests 2
+reply: Hello Grace!
+revoked: requests 3, synced <none>
+rejections: hello: /hello is already defined in server 'survival', fake.sk. Each command can be defined once.
+reply: Built
+defer
+delete original
+follow-up ephemerally: The server 'creative' didn't answer in time.
+defer
+delete original
+follow-up ephemerally: The server 'creative' disconnected before it answered.
+! /quiet finished without replying

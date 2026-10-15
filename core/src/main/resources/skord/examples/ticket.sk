@@ -1,0 +1,33 @@
+# Support tickets. An admin picks a category with /ticket-setup; then /ticket opens a channel in it.
+# Each Discord request below pauses the trigger until Discord answers. No thread waits.
+
+slash command ticket-setup:
+	description: Choose the category new tickets open in
+	permission: manage channels
+	guild only: true
+	arguments:
+		category: category "Where new tickets go"
+	trigger:
+		set {ticket-category} to arg-category
+		reply ephemerally with "New tickets will open in %name of arg-category%."
+
+slash command ticket:
+	description: Open a support ticket
+	guild only: true
+	trigger:
+		if {ticket-category} is not set:
+			reply ephemerally with "Tickets aren't set up yet. An admin can run /ticket-setup."
+			stop
+		reply with "Opening a ticket..." and store it in {_reply}
+		create text channel named "ticket-%user's name%" in category {ticket-category} and store it in {_ch}
+		if last discord error is set:
+			set {_error} to last discord error
+			if error type of {_error} is missing permission:
+				edit {_reply} to "I can't open tickets: I'm missing %missing permission of {_error} ? "a permission"% in %name of {ticket-category}%."
+			else if error type of {_error} is unknown channel:
+				edit {_reply} to "The ticket category was deleted. An admin can run /ticket-setup again."
+			else:
+				edit {_reply} to "Couldn't open a ticket: %{_error}%"
+			stop
+		send "Hi %user's mention%, describe your problem." to {_ch}
+		edit {_reply} to "Ticket opened: %{_ch}'s mention%"

@@ -1,0 +1,26 @@
+package io.github.itsnotethann.skord.bridge.api;
+
+/**
+ * A request to the bot failed: the bot reported an error, didn't answer in time, or the connection dropped.
+ * {@link #errorType()} is a short machine-readable name, such as {@code unknown message} or {@code timed out}.
+ */
+public final class BridgeRequestException extends RuntimeException {
+
+	private final String errorType;
+	private final int code;
+
+	public BridgeRequestException(String errorType, String message, int code) {
+		super(message);
+		this.errorType = errorType;
+		this.code = code;
+	}
+
+	public String errorType() {
+		return errorType;
+	}
+
+	/** Discord's error code when the failure came from Discord, otherwise 0. */
+	public int code() {
+		return code;
+	}
+}

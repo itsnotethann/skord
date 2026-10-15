@@ -1,0 +1,13 @@
+# Auto-defer, case 3: the trigger ends without pausing or replying. Nothing will reply, so skord doesn't
+# defer (that would leave a "thinking..." forever) and warns instead. The watchdog must stay quiet too:
+# the run settles well past its deadline.
+
+slash command never:
+	description: Never replies
+	trigger:
+		mark "ran"
+
+on ready:
+	fire slash command "never"
+	wait 10 ticks
+	mark "nothing sent"

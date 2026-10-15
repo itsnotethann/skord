@@ -1,0 +1,14 @@
+# An example bot. Try !ping, !whoami and !count in a channel the bot can see.
+
+on ready:
+	log "skord is online as %name of the bot%"
+
+on message received:
+	event-discord user is not a bot
+	if content of event-message is "!ping":
+		reply with "Pong! %gateway ping% ms"
+	else if content of event-message is "!whoami":
+		reply with "You are %mention of event-discord user% (id %discord id of event-discord user%) in %event-channel%"
+	else if content of event-message is "!count":
+		add 1 to {pings::%event-discord user%}
+		reply with "You have asked %{pings::%event-discord user%}% time(s). This survives a restart."

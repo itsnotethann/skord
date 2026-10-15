@@ -1,0 +1,15 @@
+# Auto-defer, case 4: the script thread is stuck in a long synchronous section. The watchdog defers from
+# its own thread before Discord's deadline (testbot sets it to 300 ms), and the late reply edits.
+#
+# It fires a second in, once the other cases are done: an 800 ms stall would otherwise hold up their
+# triggers too, and let the watchdog cover for a broken auto-defer in defer-paused.sk.
+
+slash command stuck:
+	description: Holds the script thread
+	trigger:
+		stall the script thread for 800 milliseconds
+		reply with "late"
+
+on ready:
+	wait 20 ticks
+	fire slash command "stuck"

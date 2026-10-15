@@ -1,0 +1,70 @@
+# Messages and requests, both ways. The bot is real, the server a real bridge client over a local WebSocket.
+# Different server and request names from commands.sk: the two scripts share one bot and run side by side.
+
+on bridge message "join" from server "lobby":
+	mark "join from %event-server%: %data%"
+
+on bridge message "stats" from server "lobby":
+	set {_d::*} to data
+	mark "stats: %{_d::name}% has %{_d::kills}% kills"
+
+on bridge message "nested" from server "lobby":
+	set {_n::*} to data
+	mark "nested: %{_n::player::name}% has %{_n::player::stats::kills}% kills, tag %{_n::tag}%"
+
+on bridge request "online players":
+	answer with "Ada" and "Grace"
+
+on bridge request "profile":
+	set {_p::name} to "Ada"
+	set {_p::level} to 7
+	answer with {_p::*}
+
+on ready:
+	connect fake server "lobby"
+
+	# Server to bot: a scalar, then an object (fields keep their names).
+	fake server "lobby" sends message "join" with "Ada"
+	wait 150 milliseconds
+	fake server "lobby" sends message "stats" with "name=Ada;kills=3"
+	wait 150 milliseconds
+
+	# Nested fields arrive as nested list variables.
+	fake server "lobby" sends message "nested" with "player::name=Ada;player::stats::kills=3;tag=x"
+	wait 150 milliseconds
+
+	# Bot to server, recorded by the server.
+	fake server "lobby" listens for message "season reset"
+	send bridge message "season reset" with "now" to server "lobby"
+	wait 150 milliseconds
+
+	# The server answers the bot: a list, an object, and the two ways to fail.
+	fake server "lobby" answers request "players" with "Ada,Grace,Linus"
+	fake server "lobby" answers request "status" with "tps=19.5;online=3"
+	fake server "lobby" answers request "broken" with "!fail"
+	fake server "lobby" answers request "silent" with "!hang"
+	ask server "lobby" for "players" and store it in {_players::*}
+	mark "players: %{_players::*}% (%size of {_players::*}%)"
+	ask server "lobby" for "status" and store it in {_status::*}
+	mark "status: %{_status::tps}% tps, %{_status::online}% online"
+	ask server "lobby" for "broken" and store it in {_x}
+	mark "broken: %error type of last request error%, %last request error%"
+	ask server "lobby" for "nobody knows" and store it in {_x}
+	mark "unanswered: %error type of last request error%"
+	ask server "lobby" for "silent" and store it in {_x}
+	mark "silent: %error type of last request error%"
+
+	# The bot answers the server: a list, a nested object, and no handler.
+	fake server "lobby" asks the bot for "online players" and store it in {_a::*}
+	mark "bot says: %{_a::*}%"
+	fake server "lobby" asks the bot for "profile" and store it in {_b::*}
+	mark "profile: %{_b::name}% level %{_b::level}%"
+	fake server "lobby" asks the bot for "no such thing" and store it in {_c}
+	mark "no handler: %error type of last request error%"
+
+	# A server that has gone.
+	disconnect fake server "lobby"
+	send bridge message "season reset" with "now" to server "lobby"
+	mark "send offline: %error type of last request error%"
+	ask server "lobby" for "players" and store it in {_x}
+	mark "ask offline: %error type of last request error%"

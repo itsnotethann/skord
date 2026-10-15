@@ -1,0 +1,16 @@
+# A failed request doesn't stop the trigger. Its message lands in 'last discord error', and the next
+# request that succeeds clears it. This script reads the error, so the failure isn't logged.
+
+on test "fails":
+	set {_kept} to "kept"
+	fake request "fails"
+	mark "continued, local %{_kept}%"
+	mark "error: %last discord error%"
+	fake request "succeeds"
+	if last discord error is not set:
+		mark "cleared by the next success"
+
+on ready:
+	complete fake request "succeeds" with "ok"
+	fire test event "fails"
+	fail fake request "fails" with "Missing Access"

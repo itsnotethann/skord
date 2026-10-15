@@ -1,0 +1,14 @@
+# Auto-defer, case 2: the trigger pauses before replying. skord defers as soon as the synchronous part
+# ends, well before the watchdog would, and the reply becomes an edit of the "thinking..." message.
+# A second reply is a follow-up.
+
+slash command paused:
+	description: Pauses before replying
+	trigger:
+		wait 1 tick
+		mark "resumed"
+		reply with "slow"
+		reply ephemerally with "and one more thing"
+
+on ready:
+	fire slash command "paused"

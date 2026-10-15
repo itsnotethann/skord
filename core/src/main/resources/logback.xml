@@ -1,0 +1,12 @@
+<configuration>
+	<appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+		<encoder>
+			<pattern>%d{HH:mm:ss} %-5level [%logger{0}] %msg%n</pattern>
+		</encoder>
+	</appender>
+	<!-- JDA logs every request and gateway packet at DEBUG; set this to DEBUG when chasing a gateway problem. -->
+	<logger name="net.dv8tion" level="INFO"/>
+	<root level="INFO">
+		<appender-ref ref="CONSOLE"/>
+	</root>
+</configuration>

@@ -1,0 +1,31 @@
+# A request pauses the trigger: locals survive it, and two triggers paused at once keep their own.
+
+on test "first":
+	set {_who} to "first"
+	fake request "first" and store it in {_got}
+	mark "%{_who}% got %{_got}%"
+
+on test "second":
+	set {_who} to "second"
+	fake request "second" and store it in {_got}
+	mark "%{_who}% got %{_got}%"
+
+on test "without waiting":
+	fake request "never answered" without waiting
+	mark "did not wait"
+
+on ready:
+	set {_mine} to "ready's own local"
+	fire test event "without waiting"
+	fire test event "first"
+	fire test event "second"
+	mark "both paused"
+	# Out of order: second's request finishes first.
+	complete fake request "second" with "two"
+	complete fake request "first" with "one"
+	fake request "ready" and store it in {_got}
+	mark "%{_mine}% survived, got %{_got}%"
+
+on ready:
+	wait 1 tick
+	complete fake request "ready" with "three"

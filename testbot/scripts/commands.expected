@@ -1,0 +1,10 @@
+boot: 1
+console no-op reload: 1
+console enable: 2, alpha, beta, hello, intime, never, paused and stuck
+console disable: 3, alpha, hello, intime, never, paused and stuck
+engine no-op reload: 3
+engine enable: 4, alpha, beta, hello, intime, never, paused and stuck
+engine disable: 5, alpha, hello, intime, never, paused and stuck
+reply: alpha 3 times, plus one is 4
+reply ephemerally: alpha without a count
+reply: hello from an event

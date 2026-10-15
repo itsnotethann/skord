@@ -1,0 +1,6 @@
+# Staged disabled; commands.sk enables it, then disables it again.
+
+slash command beta:
+	description: The second command
+	trigger:
+		reply with "beta"

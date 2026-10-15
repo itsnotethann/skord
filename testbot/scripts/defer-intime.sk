@@ -1,0 +1,10 @@
+# Auto-defer, case 1: the trigger replies before it pauses. One reply, no deferral.
+
+slash command intime:
+	description: Replies straight away
+	trigger:
+		reply with "fast"
+		mark "replied"
+
+on ready:
+	fire slash command "intime"

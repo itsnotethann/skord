@@ -1,0 +1,11 @@
+type: missing permission
+permission: Manage Channels
+type compares with a literal
+permission compares with a literal
+shown: Missing permission: Manage Channels
+no code: JDA refused it before sending
+type: missing permission, code 50013
+Discord doesn't say which permission
+unknown channel: Unknown Channel
+type: hierarchy
+type: other, shown: Something broke

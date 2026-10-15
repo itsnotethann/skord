@@ -1,0 +1,9 @@
+# Nothing here reads 'last discord error', so a failure is logged, naming the script and line.
+
+on test "unhandled":
+	fake request "unhandled"
+	mark "continued"
+
+on ready:
+	fire test event "unhandled"
+	fail fake request "unhandled" with "Unknown Channel"

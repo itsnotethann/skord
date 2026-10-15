@@ -1,0 +1,26 @@
+# Command sync is diff-first: boot sends the commands once, a reload that changes none sends nothing, and
+# enabling or disabling a script that declares one sends the new set. That holds for the console and for
+# the engine's own 'reload script' effect, whose loader events trigger the sync a tick later.
+
+on ready:
+	mark "boot: %command requests%"
+	run console command "sk reload commands-target"
+	mark "console no-op reload: %command requests%"
+	run console command "enable commands-extra"
+	mark "console enable: %command requests%, %synced commands%"
+	run console command "sk disable commands-extra"
+	mark "console disable: %command requests%, %synced commands%"
+
+	reload script "commands-target"
+	wait 3 ticks
+	mark "engine no-op reload: %command requests%"
+	enable script "commands-extra"
+	wait 3 ticks
+	mark "engine enable: %command requests%, %synced commands%"
+	disable script "commands-extra"
+	wait 3 ticks
+	mark "engine disable: %command requests%, %synced commands%"
+
+	fire slash command "alpha" with options "who=someone" and "count=3"
+	fire slash command "alpha" with options "who=someone else"
+	fire slash command "hello"

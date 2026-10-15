@@ -1,0 +1,16 @@
+# The command commands.sk reloads. Typed arguments: arg-count is an integer, and optional.
+
+slash command alpha:
+	description: The first command
+	arguments:
+		who: text "Who it's for"
+		count: integer? "How many times"
+	trigger:
+		if arg-count is set:
+			reply with "alpha %arg-count% times, plus one is %arg-count + 1%"
+		else:
+			reply ephemerally with "alpha without a count"
+
+# A command with no structure: the event alone declares it.
+on slash command "hello":
+	reply with "hello from an event"

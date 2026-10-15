@@ -1,0 +1,46 @@
+# A failed request's error is a value: its type, the missing permission when JDA knows it, and Discord's
+# code when the request reached Discord. Shown as text, it is the message.
+
+on test "permission":
+	fake request "permission"
+	set {_error} to last discord error
+	mark "type: %error type of {_error}%"
+	mark "permission: %missing permission of {_error}%"
+	if error type of {_error} is missing permission:
+		mark "type compares with a literal"
+	if missing permission of {_error} is manage channels:
+		mark "permission compares with a literal"
+	mark "shown: %{_error}%"
+	if error code of {_error} is not set:
+		mark "no code: JDA refused it before sending"
+
+on test "refused":
+	fake request "refused"
+	mark "type: %error type of last discord error%, code %error code of last discord error%"
+	if missing permission of last discord error is not set:
+		mark "Discord doesn't say which permission"
+
+on test "unknown":
+	fake request "unknown"
+	if error type of last discord error is unknown channel:
+		mark "unknown channel: %error message of last discord error%"
+
+on test "hierarchy":
+	fake request "hierarchy"
+	mark "type: %error type of last discord error%"
+
+on test "other":
+	fake request "other"
+	mark "type: %error type of last discord error%, shown: %last discord error%"
+
+on ready:
+	fire test event "permission"
+	fail fake request "permission" with missing permission manage channels
+	fire test event "refused"
+	fail fake request "refused" with discord error code 50013
+	fire test event "unknown"
+	fail fake request "unknown" with discord error code 10003
+	fire test event "hierarchy"
+	fail fake request "hierarchy" with a hierarchy error
+	fire test event "other"
+	fail fake request "other" with "Something broke"

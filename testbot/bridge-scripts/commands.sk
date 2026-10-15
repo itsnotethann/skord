@@ -1,0 +1,80 @@
+# A game server declares Discord commands; the bot registers them, forwards uses, and answers for the server
+# when it is away. The bot is the real one, the server a real bridge client over a local WebSocket.
+#
+# Everything runs in order from one trigger, so the global request count and command list are deterministic.
+
+on ready:
+	connect fake server "survival"
+	fake server "survival" declares command "hello" with arguments "name: text" and behaviour "reply:Hello {name}!"
+	fake server "survival" declares command "slow" and behaviour "defer:Done waiting"
+	fake server "survival" declares command "quiet" and behaviour "silent"
+	fake server "survival" declares command "boom" and behaviour "fail"
+	publish commands of fake server "survival"
+	wait 200 milliseconds
+	mark "published: requests %command requests%, synced %synced commands%"
+
+	# The server answers its own command.
+	fire slash command "hello" with options "name=Ada"
+	wait 300 milliseconds
+
+	# It defers, then replies later: "thinking..." becomes the answer.
+	fire slash command "slow"
+	wait 600 milliseconds
+
+	# A handler that throws still answers, privately.
+	fire slash command "boom"
+	wait 300 milliseconds
+
+	# Going offline: the commands stay, and using one says so.
+	disconnect fake server "survival"
+	fire slash command "hello" with options "name=Ada"
+	wait 100 milliseconds
+	mark "offline: requests %command requests%, synced %synced commands%"
+
+	# A bot restart with the server still away: same commands, nothing sent to Discord.
+	simulate a bot restart
+	wait 200 milliseconds
+	mark "restarted: requests %command requests%, synced %synced commands%"
+	fire slash command "hello" with options "name=Ada"
+	wait 100 milliseconds
+
+	# The server comes back and declares the same set: still nothing sent.
+	connect fake server "survival"
+	publish commands of fake server "survival"
+	wait 200 milliseconds
+	mark "republished: requests %command requests%"
+	fire slash command "hello" with options "name=Grace"
+	wait 300 milliseconds
+
+	# Revoking its link removes its commands.
+	run console command "sk link revoke survival"
+	wait 300 milliseconds
+	mark "revoked: requests %command requests%, synced %synced commands%"
+
+	# The server is back and its command goes quiet: the bot says so rather than leave "thinking...".
+	connect fake server "survival"
+	publish commands of fake server "survival"
+	fire slash command "quiet"
+	wait 200 milliseconds
+
+	# Two servers can't both own a command: the later one is told which, and why. The rest are taken.
+	connect fake server "creative"
+	fake server "creative" declares command "hello" and behaviour "reply:Hi"
+	fake server "creative" declares command "build" and behaviour "reply:Built"
+	fake server "creative" declares command "stuck" and behaviour "block:1500"
+	fake server "creative" declares command "stay" and behaviour "hang"
+	publish commands of fake server "creative"
+	set {_rejected::*} to rejections of fake server "creative"
+	mark "rejections: %{_rejected::*}%"
+	fire slash command "build"
+	wait 300 milliseconds
+
+	# A server that doesn't get to 'dispatched' in time: the bot gives up on it.
+	fire slash command "stuck"
+	wait 1800 milliseconds
+
+	# A server that drops while a command waits on it.
+	fire slash command "stay"
+	wait 100 milliseconds
+	disconnect fake server "creative"
+	wait 200 milliseconds

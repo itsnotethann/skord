@@ -1,0 +1,13 @@
+# Load errors: each structure here is rejected, with a message that says why.
+
+slash command alpha:
+	description: Already defined in commands-target.sk
+
+slash command Bad:
+	description: Command names are lowercase
+
+slash command order:
+	description: Required arguments go first
+	arguments:
+		first: text? "Optional"
+		second: text "Required, after an optional one"
