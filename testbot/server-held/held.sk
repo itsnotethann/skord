@@ -12,3 +12,6 @@ on test boost (held):
 	if {_n} is "6":
 		wait for gate "g"
 		mark "boost 6 finished"
+	if {_n} is "8":
+		slowAnswer() from "bot" and store it in {_a}
+		mark "boost 8 called %{_a}%"

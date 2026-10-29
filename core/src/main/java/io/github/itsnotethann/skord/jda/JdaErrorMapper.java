@@ -1,6 +1,5 @@
 package io.github.itsnotethann.skord.jda;
 
-import io.github.itsnotethann.skord.bridge.BridgeFailure;
 import io.github.itsnotethann.skord.discord.DiscordError;
 import io.github.itsnotethann.skord.discord.ErrorMapper;
 import io.github.itsnotethann.skord.protocol.DiscordPermission;
@@ -35,11 +34,6 @@ public final class JdaErrorMapper implements ErrorMapper {
 				default -> DiscordError.Type.OTHER;
 			}, meaning(response), null, response.getErrorCode() > 0
 				? response.getErrorCode() : response.getErrorResponse().getCode());
-			case BridgeFailure failure -> new DiscordError(switch (failure.kind()) {
-				case "offline" -> DiscordError.Type.OFFLINE;
-				case "timed out" -> DiscordError.Type.TIMED_OUT;
-				default -> DiscordError.Type.REFUSED;
-			}, DiscordError.describe(failure), null, 0);
 			default -> null;
 		};
 	}

@@ -107,6 +107,7 @@ public final class TestBot implements PlatformProvider {
 		Discord.install(FakeDiscord.INSTANCE);
 		CommandSync.install(work.resolve(".skord").resolve("commands.hash"), 0, FakeDiscord.commandSink());
 		TestBridge.start(work, scriptThread);
+		TestBridge.registerSlowFunction();
 
 		CountDownLatch live = new CountDownLatch(1);
 		Throwable[] failure = new Throwable[1];
@@ -183,6 +184,15 @@ public final class TestBot implements PlatformProvider {
 		Files.createDirectories(target);
 		for (Path script : scripts(source, true))
 			Files.copy(script, target.resolve(script.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+		Path servers = source.resolve("servers");
+		if (Files.isDirectory(servers)) {
+			Path saved = work.resolve(".skord").resolve("servers");
+			Files.createDirectories(saved);
+			try (Stream<Path> files = Files.list(servers)) {
+				for (Path file : files.filter(path -> path.getFileName().toString().endsWith(".json")).toList())
+					Files.copy(file, saved.resolve(file.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+			}
+		}
 	}
 
 	private static void stageVariables(Path scripts, Path work) throws IOException {

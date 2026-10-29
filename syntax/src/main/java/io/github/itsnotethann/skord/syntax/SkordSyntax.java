@@ -56,6 +56,7 @@ public final class SkordSyntax {
 
 		RestSyntax.register();
 		SlashSyntax.register();
+		io.github.itsnotethann.skord.shared.SharedSyntax.register();
 
 		Skript.registerExpression(ExprSelf.class, UserRef.class, ExpressionType.SIMPLE, "[the] bot [user]");
 		Skript.registerExpression(ExprPing.class, Long.class, ExpressionType.SIMPLE, "[the] gateway ping");

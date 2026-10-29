@@ -74,6 +74,16 @@ public abstract class RestEffect extends Effect {
 	 */
 	protected abstract @Nullable CompletionStage<?> request(PlatformEvent event);
 
+	protected final boolean waits() {
+		return waits;
+	}
+
+	protected void succeeded(PlatformEvent event) {}
+
+	protected final void raise(PlatformEvent event, DiscordError error) {
+		LAST_ERROR.put(event, error);
+	}
+
 	/** Whether the script stores the result, so the request is worth fetching it for. Valid from {@link #initRest}. */
 	protected final boolean storesResult() {
 		return store != null;
@@ -136,6 +146,7 @@ public abstract class RestEffect extends Effect {
 					fail(event, unwrap(error));
 				} else {
 					LAST_ERROR.remove(event);
+					succeeded(event);
 					store(event, result);
 				}
 				if (next != null)

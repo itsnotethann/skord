@@ -63,11 +63,32 @@ final class TestBridge {
 		try (ServerSocket probe = new ServerSocket(0)) {
 			port = probe.getLocalPort();
 		}
+		Path saved = work.resolve(".skord").resolve("servers");
+		if (java.nio.file.Files.isDirectory(saved)) {
+			io.github.itsnotethann.skord.bridge.LinkStore seeding =
+				new io.github.itsnotethann.skord.bridge.LinkStore(work.resolve(".skord").resolve("links.yml"));
+			try (var files = java.nio.file.Files.list(saved)) {
+				for (Path file : files.filter(path -> path.getFileName().toString().endsWith(".json")).toList()) {
+					String name = file.getFileName().toString().replaceAll("\\.json$", "");
+					if (!seeding.exists(name))
+						seeding.create(name);
+				}
+			}
+		}
 		host = BridgeHost.start(work, new BridgeHost.Settings(port, "127.0.0.1", TIMEOUT_MILLIS, HELD_MAX_EVENTS,
 			BridgeHost.Settings.DEFAULT_HELD_MAX_AGE_MILLIS, List.of("b")),
 			() -> new Frame.BotInfo("1", "TestBot"), scriptThread::execute);
 		if (host.server() == null)
 			throw new IllegalStateException("the test bridge did not start");
+	}
+
+	static void registerSlowFunction() {
+		io.github.itsnotethann.skord.shared.SharedFunctions.register(
+			new Frame.FunctionSpec("slowAnswer", List.of(), "text"), args -> {
+				CompletableFuture<com.google.gson.JsonElement> later = new CompletableFuture<>();
+				TIMERS.schedule(() -> later.complete(new com.google.gson.JsonPrimitive("slow")), 600, TimeUnit.MILLISECONDS);
+				return later;
+			});
 	}
 
 	static Path workDir() {
@@ -248,87 +269,61 @@ final class TestBridge {
 		return server == null ? List.of() : List.copyOf(server.rejected);
 	}
 
-	/**
-	 * Test data as text: {@code "a=1;b=x"} is an object, {@code "x,y"} a list, anything else a string.
-	 */
-	private static com.google.gson.JsonElement dataOf(@org.jetbrains.annotations.Nullable String text) {
-		if (text == null)
-			return com.google.gson.JsonNull.INSTANCE;
-		if (!text.contains("=") && text.contains(",")) {
-			com.google.gson.JsonArray array = new com.google.gson.JsonArray();
-			for (String part : text.split(","))
-				array.add(part.trim());
-			return array;
-		}
-		if (!text.contains("="))
-			return new com.google.gson.JsonPrimitive(text);
-		// "a=1;b::c=x": numbers are numbers, and "::" nests, as it does in a list variable.
-		com.google.gson.JsonObject root = new com.google.gson.JsonObject();
-		for (String part : text.split(";")) {
-			String[] pair = part.split("=", 2);
-			String[] path = pair[0].trim().split("::");
-			com.google.gson.JsonObject at = root;
-			for (int i = 0; i < path.length - 1; i++) {
-				if (!at.has(path[i]))
-					at.add(path[i], new com.google.gson.JsonObject());
-				at = at.getAsJsonObject(path[i]);
-			}
-			String value = pair.length > 1 ? pair[1].trim() : "";
-			String last = path[path.length - 1];
-			if (value.matches("-?\\d+"))
-				at.addProperty(last, Long.parseLong(value));
-			else if (value.matches("-?\\d+\\.\\d+"))
-				at.addProperty(last, Double.parseDouble(value));
-			else
-				at.addProperty(last, value);
-		}
-		return root;
+	private static com.google.gson.JsonArray argumentsOf(@org.jetbrains.annotations.Nullable String json) {
+		if (json == null || json.isBlank())
+			return new com.google.gson.JsonArray();
+		return com.google.gson.JsonParser.parseString(json).getAsJsonArray();
 	}
 
 	private static String show(com.google.gson.JsonElement data) {
 		return data.isJsonPrimitive() ? data.getAsString() : data.toString();
 	}
 
-	static boolean sendMessage(String name, String message, @org.jetbrains.annotations.Nullable String data) {
+	static boolean sendCall(String name, String function, @org.jetbrains.annotations.Nullable String json) {
 		FakeServer server = SERVERS.get(name);
-		return server != null && server.bridge != null && server.bridge.send(message, dataOf(data));
+		return server != null && server.bridge != null && server.bridge.send(null, function, argumentsOf(json));
 	}
 
-	/** Records, under {@code script}, each message of this name the server receives. */
-	static void listen(String name, String message, String script) {
+	static void record(String name, String function, String script) {
 		FakeServer server = SERVERS.computeIfAbsent(name, FakeServer::new);
-		server.bridge.onCall(message, data -> {
-			TestBot.recorder().mark(script, name + " got message " + message + ": " + show(data));
+		server.bridge.onCall(function, data -> {
+			TestBot.recorder().mark(script, name + " got call " + function + ": " + show(data));
 			return CompletableFuture.completedFuture(com.google.gson.JsonNull.INSTANCE);
 		});
 	}
 
-	/** {@code "!hang"} never answers and {@code "!fail"} answers with an error; otherwise {@link #dataOf}. */
-	static void answer(String name, String request, String data) {
+	static void offer(String name, String function, String answer) {
 		FakeServer server = SERVERS.computeIfAbsent(name, FakeServer::new);
-		server.bridge.onCall(request, ignored -> switch (data) {
+		server.bridge.onCall(function, ignored -> switch (answer) {
 			case "!hang" -> new CompletableFuture<>();
 			case "!fail" -> CompletableFuture.failedFuture(new IllegalStateException("fake server refusal"));
-			default -> CompletableFuture.completedFuture(dataOf(data));
+			default -> CompletableFuture.completedFuture(com.google.gson.JsonParser.parseString(answer));
 		});
 	}
 
-	/** The fake server asks the bot; completes with the answer in the shape scripts store it. */
-	static CompletionStage<io.github.itsnotethann.skord.rest.KeyedResult> ask(String name, String request,
-			@org.jetbrains.annotations.Nullable String data) {
+	static CompletionStage<Void> declareFunctions(String name, String names) {
 		FakeServer server = SERVERS.get(name);
 		if (server == null || server.bridge == null)
 			return CompletableFuture.failedFuture(new IllegalStateException("fake server '" + name + "' isn't connected"));
-		return server.bridge.ask(request, dataOf(data))
-			.handle((answer, error) -> {
-				if (error == null)
-					return io.github.itsnotethann.skord.bridge.BridgeData.toSkript(answer);
-				Throwable cause = error instanceof java.util.concurrent.CompletionException && error.getCause() != null
-					? error.getCause() : error;
-				if (cause instanceof io.github.itsnotethann.skord.bridge.api.BridgeRequestException failure)
-					throw new io.github.itsnotethann.skord.bridge.BridgeFailure(failure.errorType(), failure.getMessage());
-				throw new RuntimeException(cause);
-			});
+		List<Frame.FunctionSpec> specs = new ArrayList<>();
+		for (String function : names.split(","))
+			specs.add(new Frame.FunctionSpec(function.trim(), List.of(), null));
+		server.bridge.declareFunctions(specs);
+		return until(() -> host.router().calls().functionsOf(name) != null
+			&& host.router().calls().functionsOf(name).size() == specs.size(), "the bot to take " + name + "'s functions");
+	}
+
+	static CompletionStage<io.github.itsnotethann.skord.rest.KeyedResult> call(String name, @org.jetbrains.annotations.Nullable String target, String function,
+			@org.jetbrains.annotations.Nullable String json) {
+		FakeServer server = SERVERS.get(name);
+		if (server == null || server.bridge == null)
+			return CompletableFuture.failedFuture(new IllegalStateException("fake server '" + name + "' isn't connected"));
+		return server.bridge.call(target, function, argumentsOf(json)).handle((answer, error) -> {
+			if (error == null)
+				return io.github.itsnotethann.skord.shared.SharedValues.toSkript(answer);
+			Throwable cause = io.github.itsnotethann.skord.remote.ServerCalls.translate(error);
+			throw cause instanceof RuntimeException runtime ? runtime : new RuntimeException(cause);
+		});
 	}
 
 	static List<String> linkCommand(String line) {

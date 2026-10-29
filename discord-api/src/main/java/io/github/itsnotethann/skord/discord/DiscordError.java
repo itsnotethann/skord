@@ -41,6 +41,10 @@ public record DiscordError(Type type, String message, @Nullable DiscordPermissio
 		OFFLINE,
 		/** A linked game server answered with an error, or has no answer for the request. */
 		REFUSED,
+		/** The target has no shared function of that name. */
+		NO_SUCH_FUNCTION,
+		/** A shared function raised an error. */
+		ERROR,
 		OUT_OF_SCOPE,
 		OTHER;
 

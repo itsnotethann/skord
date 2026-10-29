@@ -36,6 +36,8 @@ import io.github.itsnotethann.skord.interaction.Interaction;
 import io.github.itsnotethann.skord.protocol.CommandSpec;
 import io.github.itsnotethann.skord.protocol.Frame;
 import io.github.itsnotethann.skord.protocol.Ref;
+import io.github.itsnotethann.skord.shared.SharedCalls;
+import io.github.itsnotethann.skord.shared.SharedFunctions;
 import io.github.itsnotethann.skord.syntax.EventSpecs;
 import org.jetbrains.annotations.Nullable;
 import org.skriptlang.skript.lang.event.PlatformEvent;
@@ -50,11 +52,13 @@ public final class RemoteServer {
 	private final BridgePlatform platform;
 	private final RemoteDiscord discord = new RemoteDiscord();
 	private final List<DiscordEvents.Subscription> live = new ArrayList<>();
+	private final java.util.Set<String> offered = new java.util.LinkedHashSet<>();
 	private volatile @Nullable Bridge bridge;
 
 	public RemoteServer(BridgePlatform platform) {
 		this.platform = platform;
 		Discord.install(discord);
+		SharedCalls.install(new ServerCalls(platform, () -> bridge));
 	}
 
 	public RemoteDiscord discord() {
@@ -94,6 +98,21 @@ public final class RemoteServer {
 		for (CommandSpec spec : CommandRegistry.specs().values())
 			commands.add(new Command(spec, context -> dispatch(spec, context)));
 		current.declareCommands(commands);
+		List<Frame.FunctionSpec> specs = SharedFunctions.specs();
+		for (String gone : new ArrayList<>(offered)) {
+			if (specs.stream().noneMatch(spec -> spec.name().equals(gone))) {
+				current.removeCall(gone);
+				offered.remove(gone);
+			}
+		}
+		for (Frame.FunctionSpec spec : specs) {
+			SharedFunctions.Entry entry = SharedFunctions.get(spec.name());
+			if (entry != null) {
+				current.onCall(spec.name(), entry.handler());
+				offered.add(spec.name());
+			}
+		}
+		current.declareFunctions(specs);
 	}
 
 	private static final Map<EventSpec.Kind, Function<DiscordEvent, PlatformEvent>> FACTORIES =

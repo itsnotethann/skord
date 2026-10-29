@@ -8,15 +8,19 @@ slash command botonly:
 		reply with "bot botonly"
 
 on ready:
-	start server process "a" using scripts "a"
+	start server process "a" allowing "call" using scripts "a"
 	start server process "b" using scripts "b"
 	start server process "c" using scripts "c"
 
 	# The user's linked player is online on a: a answers although b is first in the order.
 	server process "a" reports player "Ada" joining
-	link discord user "555" to player "Ada"
 	wait 500 milliseconds
 	fire slash command "who" as user "555"
+	wait 300 milliseconds
+
+	server process "a" reports player "Cleo" joining
+	wait 300 milliseconds
+	fire slash command "who" as user "888"
 	wait 300 milliseconds
 
 	# Nobody linked: the route order puts b first although a declared the command first.
@@ -44,6 +48,6 @@ on ready:
 		mark "command requests went from %{_before}% to %{_after}%"
 
 	# The saved commands still route: a comes back and answers.
-	start server process "a" using scripts "a"
+	start server process "a" allowing "call" using scripts "a"
 	fire slash command "who" as user "777"
 	wait 300 milliseconds

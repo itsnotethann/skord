@@ -2,3 +2,10 @@ slash command who:
 	description: Says which server answered
 	trigger:
 		reply with "who from a"
+
+shared function linkedPlayer(id: text) :: text:
+	if {_id} is "888":
+		return "6e1def9b-fa26-3279-b0ba-900d46f8c9b3"
+
+on ready:
+	linked("555", "1a382809-b7c0-3f68-ae12-dd15677c5497", "Ada") from "bot" without waiting

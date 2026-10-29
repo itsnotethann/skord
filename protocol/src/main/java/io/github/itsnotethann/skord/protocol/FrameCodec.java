@@ -149,7 +149,8 @@ public final class FrameCodec {
 				yield new Frame.Functions(List.copyOf(functions));
 			}
 			case "call" -> new Frame.Call(string(object, "id"), string(object, "function"), args(object),
-				object.has("wait") && object.get("wait").getAsBoolean());
+				object.has("wait") && object.get("wait").getAsBoolean(),
+				object.has("target") && object.get("target").isJsonPrimitive() ? object.get("target").getAsString() : null);
 			case "call-result" -> new Frame.CallResult(string(object, "id"), data(object), failure(object));
 			case "players" -> new Frame.Players(object.has("snapshot") && object.get("snapshot").getAsBoolean(),
 				players(object, "joined"), players(object, "left"));

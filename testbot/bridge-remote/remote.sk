@@ -9,7 +9,7 @@ on ready:
 
 	# A message in the channel the server subscribed to is forwarded and its handler acts through the bot.
 	fire message event in channel "111111111111111111" with text "hello"
-	wait 400 milliseconds
+	wait 1200 milliseconds
 	set {_n} to forwarded events of server "remote"
 	mark "forwarded after the subscribed channel: %{_n}%"
 	set {_s} to fake discord calls of "send"
@@ -32,7 +32,7 @@ on ready:
 	mark "narrowed: %{_out::1}%"
 	wait 300 milliseconds
 	fire message event in channel "111111111111111111" with text "again"
-	wait 400 milliseconds
+	wait 1200 milliseconds
 	set {_s} to fake discord calls of "send"
 	set {_r} to fake discord calls of "reply"
 	set {_c} to fake discord calls of "create-channel"

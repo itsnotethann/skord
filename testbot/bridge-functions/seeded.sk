@@ -1,0 +1,4 @@
+
+on ready:
+	known() from "seeded" without waiting
+	unknown() from "seeded" and store it in {_x}

@@ -16,14 +16,12 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import ch.njol.skript.Skript;
-import ch.njol.skript.effects.Delay;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import io.github.itsnotethann.skord.event.BridgeMessageEvent;
-import io.github.itsnotethann.skord.event.BridgeRequestEvent;
 import io.github.itsnotethann.skord.event.ServerConnectEvent;
 import io.github.itsnotethann.skord.event.ServerDisconnectEvent;
-import io.github.itsnotethann.skord.rest.KeyedResult;
+import io.github.itsnotethann.skord.shared.SharedFunctions;
 import io.github.itsnotethann.skord.command.CommandRegistry;
 import io.github.itsnotethann.skord.command.CommandSync;
 import io.github.itsnotethann.skord.event.SlashEvent;
@@ -75,7 +73,9 @@ public final class BridgeRouter implements BridgeServer.Listener {
 		}
 	}
 
-	private record Ask(String server, java.util.concurrent.CompletableFuture<KeyedResult> future) {}
+	public static final String LINKED_PLAYER = "linkedPlayer";
+
+	private static final long LINK_REFRESH_MILLIS = 1_000;
 
 	private static volatile @Nullable BridgeRouter current;
 
@@ -99,8 +99,7 @@ public final class BridgeRouter implements BridgeServer.Listener {
 	private final Map<String, List<DiscordEvents.Subscription>> heldSubscriptions = new ConcurrentHashMap<>();
 	private final Map<String, Set<String>> inflight = new ConcurrentHashMap<>();
 	private final Set<String> ready = ConcurrentHashMap.newKeySet();
-	// Bot-to-server requests waiting for their response, by request id.
-	private final Map<String, Ask> asks = new ConcurrentHashMap<>();
+	private final BridgeCalls calls;
 	private final LinkStore links;
 	private final ComponentRoutes components;
 	private final Map<String, List<DiscordEvents.Subscription>> subscriptions = new ConcurrentHashMap<>();
@@ -117,6 +116,34 @@ public final class BridgeRouter implements BridgeServer.Listener {
 		this.playerLinks = new FilePlayerLinks(serversDirectory.resolveSibling("player-links.json"));
 		this.links = links;
 		this.components = new ComponentRoutes(serversDirectory.resolveSibling("components.json"), ComponentRoutes.CAP);
+		this.calls = new BridgeCalls(() -> this.server, links, store, script, timers, settings.timeoutMillis());
+		registerLinkFeed();
+		registerBoostLookup();
+	}
+
+	public BridgeCalls calls() {
+		return calls;
+	}
+
+	private void registerLinkFeed() {
+		SharedFunctions.register(new Frame.FunctionSpec("linked", List.of(
+			new Frame.FunctionSpec.Parameter("discordId", "text"), new Frame.FunctionSpec.Parameter("uuid", "text"),
+			new Frame.FunctionSpec.Parameter("name", "text")), null), arguments -> {
+			JsonArray given = arguments.getAsJsonArray();
+			playerLinks.link(given.get(0).getAsString(), given.get(1).getAsString());
+			return java.util.concurrent.CompletableFuture.completedFuture(com.google.gson.JsonNull.INSTANCE);
+		});
+		SharedFunctions.register(new Frame.FunctionSpec("unlinked", List.of(
+			new Frame.FunctionSpec.Parameter("discordId", "text")), null), arguments -> {
+			playerLinks.unlink(arguments.getAsJsonArray().get(0).getAsString());
+			return java.util.concurrent.CompletableFuture.completedFuture(com.google.gson.JsonNull.INSTANCE);
+		});
+	}
+
+	private void registerBoostLookup() {
+		SharedFunctions.register(new Frame.FunctionSpec("boostStart", List.of(
+			new Frame.FunctionSpec.Parameter("discordId", "text")), "text"), arguments ->
+			BoostLookup.answer(io.github.itsnotethann.skord.SkordHost.jda(), arguments.getAsJsonArray().get(0).getAsString()));
 	}
 
 	/** How many frames of this type the server has sent since the bot started. */
@@ -162,6 +189,7 @@ public final class BridgeRouter implements BridgeServer.Listener {
 			Instant seen = store.loadLastSeen(name);
 			if (seen != null)
 				lastSeen.put(name, seen);
+			calls.restore(name);
 			List<Frame.EventSpec> savedHeld = store.loadHeld(name);
 			if (!savedHeld.isEmpty()) {
 				heldSpecs.put(name, savedHeld);
@@ -180,6 +208,7 @@ public final class BridgeRouter implements BridgeServer.Listener {
 	/** Drops a server's commands: its link was revoked. */
 	public void forget(String name) {
 		store.delete(name);
+		calls.forget(name);
 		lastSeen.remove(name);
 		players.remove(name);
 		components.forget(name);
@@ -203,6 +232,7 @@ public final class BridgeRouter implements BridgeServer.Listener {
 	 */
 	public void reloadFromDisk(List<String> linkedServers) {
 		CommandRegistry.clearRemote();
+		calls.clearMemory();
 		lastSeen.clear();
 		linkedServers.forEach(this::cancelHeld);
 		held.clear();
@@ -222,6 +252,7 @@ public final class BridgeRouter implements BridgeServer.Listener {
 			store.saveLastSeen(name, now);
 			players.put(name, new java.util.LinkedHashMap<>());
 			inflight.remove(name);
+			calls.publishTo(name);
 			Skript.eventBus().fire(new ServerConnectEvent(name, now));
 		});
 	}
@@ -279,11 +310,7 @@ public final class BridgeRouter implements BridgeServer.Listener {
 			ready.remove(name);
 			inflight.remove(name);
 			Skript.eventBus().fire(new ServerDisconnectEvent(name, now));
-			for (Map.Entry<String, Ask> entry : asks.entrySet()) {
-				if (entry.getValue().server().equals(name) && asks.remove(entry.getKey(), entry.getValue()))
-					entry.getValue().future().completeExceptionally(
-						new BridgeFailure("offline", "The server '" + name + "' disconnected before it answered"));
-			}
+			calls.disconnected(name);
 			for (Map.Entry<String, Pending> entry : pending.entrySet()) {
 				Pending lost = entry.getValue();
 				if (!lost.server.equals(name) || !pending.remove(entry.getKey(), lost))
@@ -304,8 +331,9 @@ public final class BridgeRouter implements BridgeServer.Listener {
 				case Frame.Commands commands -> accept(name, commands);
 				case Frame.Respond respond -> respond(name, respond);
 				case Frame.Dispatched dispatched -> dispatched(name, dispatched);
-				case Frame.Call call -> call(name, call);
-				case Frame.CallResult result -> response(name, result);
+				case Frame.Call call -> calls.incoming(name, call);
+				case Frame.Functions functions -> calls.declared(name, functions);
+				case Frame.CallResult result -> calls.result(name, result);
 				case Frame.Players update -> players(name, update);
 				case Frame.Action action -> action(name, action);
 				case Frame.Subscribe subscribe -> subscribe(name, subscribe);
@@ -321,40 +349,6 @@ public final class BridgeRouter implements BridgeServer.Listener {
 	}
 
 	// ---- script thread
-
-	/** Sends a named message to a server. Fails with an {@code offline} failure if it isn't connected. */
-	public java.util.concurrent.CompletionStage<Void> sendMessage(String target, String message, JsonElement data) {
-		BridgeServer live = server;
-		if (live == null || !live.send(target, new Frame.Call(UUID.randomUUID().toString(), message, data, false)))
-			return java.util.concurrent.CompletableFuture.failedFuture(
-				new BridgeFailure("offline", "The server '" + target + "' is offline right now"));
-		return java.util.concurrent.CompletableFuture.completedFuture(null);
-	}
-
-	/**
-	 * Asks a server something and completes with its answer, as values and keys ready for a script to store. Fails
-	 * with {@code offline}, {@code timed out} or {@code refused}.
-	 */
-	public java.util.concurrent.CompletionStage<KeyedResult> ask(String target, String question, JsonElement data) {
-		BridgeServer live = server;
-		if (live == null || !live.isConnected(target))
-			return java.util.concurrent.CompletableFuture.failedFuture(
-				new BridgeFailure("offline", "The server '" + target + "' is offline right now"));
-		String id = UUID.randomUUID().toString();
-		java.util.concurrent.CompletableFuture<KeyedResult> future = new java.util.concurrent.CompletableFuture<>();
-		asks.put(id, new Ask(target, future));
-		if (!live.send(target, new Frame.Call(id, question, data, true))) {
-			asks.remove(id);
-			return java.util.concurrent.CompletableFuture.failedFuture(
-				new BridgeFailure("offline", "The server '" + target + "' is offline right now"));
-		}
-		timers.schedule(() -> {
-			if (asks.remove(id) != null)
-				future.completeExceptionally(new BridgeFailure("timed out", "The server '" + target
-					+ "' didn't answer in time"));
-		}, timeoutMillis, TimeUnit.MILLISECONDS);
-		return future;
-	}
 
 	private void action(String name, Frame.Action frame) {
 		BridgeServer live = server;
@@ -511,47 +505,12 @@ public final class BridgeRouter implements BridgeServer.Listener {
 			forwarded.computeIfAbsent(name, key -> new java.util.concurrent.atomic.AtomicInteger()).incrementAndGet();
 	}
 
-	private void call(String name, Frame.Call call) {
-		if (call.waiting())
-			request(name, call);
-		else
-			Skript.eventBus().fire(new BridgeMessageEvent(name, call.function(), BridgeData.toSkript(call.args())));
-	}
-
 	private void players(String name, Frame.Players update) {
 		Map<String, String> online = players.computeIfAbsent(name, key -> new java.util.LinkedHashMap<>());
 		if (update.snapshot())
 			online.clear();
 		update.joined().forEach(player -> online.put(player.uuid(), player.name()));
 		update.left().forEach(player -> online.remove(player.uuid()));
-	}
-
-	private void response(String name, Frame.CallResult frame) {
-		Ask ask = asks.get(frame.id());
-		if (ask == null || !ask.server().equals(name) || !asks.remove(frame.id(), ask))
-			return;
-		if (frame.error() != null)
-			ask.future().completeExceptionally(new BridgeFailure("refused", frame.error().message()));
-		else
-			ask.future().complete(BridgeData.toSkript(frame.data()));
-	}
-
-	private void request(String name, Frame.Call frame) {
-		BridgeServer live = server;
-		if (live == null)
-			return;
-		BridgeRequestEvent event = new BridgeRequestEvent(name, frame.function(), BridgeData.toSkript(frame.args()));
-		Skript.eventBus().fire(event);
-		// No script answered, and none is waiting on something that could: say so now, not at the asker's timeout.
-		if (!event.answer().isDone() && !Delay.isDelayed(event)) {
-			live.send(name, new Frame.CallResult(frame.id(), com.google.gson.JsonNull.INSTANCE, new Frame.Result.Failure(
-				"no-handler", "The bot has no answer for '" + frame.function() + "'", 0)));
-			return;
-		}
-		event.answer().whenComplete((data, error) -> live.send(name, error != null
-			? new Frame.CallResult(frame.id(), com.google.gson.JsonNull.INSTANCE,
-				new Frame.Result.Failure("error", String.valueOf(error.getMessage()), 0))
-			: new Frame.CallResult(frame.id(), data, null)));
 	}
 
 	private void accept(String name, Frame.Commands commands) {
@@ -590,7 +549,34 @@ public final class BridgeRouter implements BridgeServer.Listener {
 	/** Sends a slash command that servers own to the one {@link #route} picks, or answers that none is online. */
 	public void forward(List<String> owners, SlashEvent slash, boolean locallyPaused) {
 		UserRef user = slash.user();
-		String chosen = route(owners, user == null ? null : Long.toString(user.id()));
+		String discordId = user == null ? null : Long.toString(user.id());
+		if (discordId != null && playerLinks.uuid(discordId) == null) {
+			List<String> online = owners.stream().filter(this::isOnline).toList();
+			if (!online.isEmpty()) {
+				refreshLink(discordId, online, 0).whenComplete((done, error) ->
+					script.execute(() -> forwardRouted(owners, slash, locallyPaused, discordId)));
+				return;
+			}
+		}
+		forwardRouted(owners, slash, locallyPaused, discordId);
+	}
+
+	private java.util.concurrent.CompletableFuture<Void> refreshLink(String discordId, List<String> owners, int index) {
+		if (index >= owners.size())
+			return java.util.concurrent.CompletableFuture.completedFuture(null);
+		JsonArray args = new JsonArray();
+		args.add(discordId);
+		return calls.ask(owners.get(index), LINKED_PLAYER, args, LINK_REFRESH_MILLIS).handle((answer, error) -> {
+			if (error == null && answer != null && answer.isJsonPrimitive() && !answer.getAsString().isBlank())
+				playerLinks.link(discordId, answer.getAsString());
+			return null;
+		}).thenCompose(done -> playerLinks.uuid(discordId) != null
+			? java.util.concurrent.CompletableFuture.<Void>completedFuture(null)
+			: refreshLink(discordId, owners, index + 1));
+	}
+
+	private void forwardRouted(List<String> owners, SlashEvent slash, boolean locallyPaused, @Nullable String discordId) {
+		String chosen = route(owners, discordId);
 		if (chosen != null) {
 			forward(chosen, slash, locallyPaused);
 		} else if (owners.size() == 1) {

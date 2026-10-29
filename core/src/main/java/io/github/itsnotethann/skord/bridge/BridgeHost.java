@@ -8,6 +8,7 @@ import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 import io.github.itsnotethann.skord.protocol.Frame;
+import io.github.itsnotethann.skord.shared.SharedCalls;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +68,7 @@ public final class BridgeHost {
 				router = new BridgeRouter(state.resolve("servers"), script, settings, links);
 				server = new BridgeServer(new InetSocketAddress(settings.bind(), settings.port()), links, bot, router);
 				router.attach(server);
+				SharedCalls.install(router.calls());
 				router.restore(links.list().stream().map(LinkStore.Link::name).toList());
 				server.startAndWait();
 				LOGGER.info("Bridge listening on {}:{}", settings.bind(), settings.port());

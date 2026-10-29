@@ -8,6 +8,7 @@ public record EventSpec(Kind kind, Map<String, String> filters, boolean held) {
 		READY,
 		MESSAGE,
 		SLASH_COMMAND,
+		BOOST_START,
 		TEST_BOOST;
 
 		public String wire() {
@@ -23,7 +24,11 @@ public record EventSpec(Kind kind, Map<String, String> filters, boolean held) {
 		}
 
 		public @org.jetbrains.annotations.Nullable io.github.itsnotethann.skord.protocol.Listen listen() {
-			return this == MESSAGE ? io.github.itsnotethann.skord.protocol.Listen.MESSAGES : null;
+			return switch (this) {
+				case MESSAGE -> io.github.itsnotethann.skord.protocol.Listen.MESSAGES;
+				case BOOST_START -> io.github.itsnotethann.skord.protocol.Listen.BOOSTS;
+				default -> null;
+			};
 		}
 	}
 

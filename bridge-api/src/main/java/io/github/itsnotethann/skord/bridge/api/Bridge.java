@@ -64,6 +64,8 @@ public final class Bridge implements AutoCloseable {
 
 		/** The bot changed this server's scope while it was connected. */
 		default void onScopeChanged(Set<Scope> scope, Set<Listen> listen) {}
+
+		default void onBotFunctions(List<Frame.FunctionSpec> functions) {}
 	}
 
 	private final BridgePlatform platform;
@@ -89,6 +91,9 @@ public final class Bridge implements AutoCloseable {
 	private volatile boolean declared;
 	private volatile List<Frame.EventSpec> subscriptions = List.of();
 	private volatile boolean subscribed;
+	private volatile List<Frame.FunctionSpec> functionSpecs = List.of();
+	private volatile boolean functionsDeclared;
+	private volatile @Nullable List<Frame.FunctionSpec> botFunctions;
 	private volatile State state = State.CONNECTING;
 	private volatile @Nullable Frame.BotInfo bot;
 
@@ -206,12 +211,36 @@ public final class Bridge implements AutoCloseable {
 		return Set.copyOf(scope);
 	}
 
-	public boolean send(String name, JsonElement data) {
-		return state == State.CONNECTED
-			&& client.send(new Frame.Call(UUID.randomUUID().toString(), name, data, false));
+	public void declareFunctions(List<Frame.FunctionSpec> declared) {
+		this.functionSpecs = List.copyOf(declared);
+		this.functionsDeclared = true;
+		publishFunctions();
 	}
 
-	public CompletionStage<JsonElement> ask(String name, JsonElement data) {
+	private void publishFunctions() {
+		if (!functionsDeclared || state != State.CONNECTED)
+			return;
+		client.send(new Frame.Functions(functionSpecs));
+	}
+
+	public @Nullable List<Frame.FunctionSpec> botFunctions() {
+		return botFunctions;
+	}
+
+	public CompletionStage<JsonElement> call(@Nullable String target, String function, JsonElement args) {
+		return ask(function, args, target);
+	}
+
+	public CompletionStage<JsonElement> callAll(String function, JsonElement args) {
+		return ask(function, args, Frame.Call.ALL);
+	}
+
+	public boolean send(@Nullable String target, String function, JsonElement args) {
+		return state == State.CONNECTED
+			&& client.send(new Frame.Call(UUID.randomUUID().toString(), function, args, false, target));
+	}
+
+	private CompletionStage<JsonElement> ask(String name, JsonElement data, @Nullable String target) {
 		CompletableFuture<JsonElement> answer = new CompletableFuture<>();
 		if (state != State.CONNECTED) {
 			answer.completeExceptionally(new BridgeRequestException("offline", "The bridge isn't connected to the bot", 0));
@@ -220,7 +249,7 @@ public final class Bridge implements AutoCloseable {
 		String id = UUID.randomUUID().toString();
 		CompletableFuture<Frame.CallResult> reply = new CompletableFuture<>();
 		asks.put(id, reply);
-		if (!client.send(new Frame.Call(id, name, data, true))) {
+		if (!client.send(new Frame.Call(id, name, data, true, target))) {
 			asks.remove(id);
 			answer.completeExceptionally(new BridgeRequestException("offline", "The bridge isn't connected to the bot", 0));
 			return answer;
@@ -228,13 +257,13 @@ public final class Bridge implements AutoCloseable {
 		reply.orTimeout(config.timeoutMillis(), TimeUnit.MILLISECONDS).whenComplete((response, error) -> {
 			asks.remove(id);
 			if (error instanceof java.util.concurrent.TimeoutException)
-				answer.completeExceptionally(new BridgeRequestException("timed out", "The bot didn't answer in time", 0));
+				answer.completeExceptionally(new BridgeRequestException("timed out", "'" + name + "' didn't answer in time", 0));
 			else if (error != null)
 				answer.completeExceptionally(error instanceof BridgeRequestException ? error
 					: new BridgeRequestException("error", String.valueOf(error.getMessage()), 0));
 			else if (response.error() != null)
-				answer.completeExceptionally(new BridgeRequestException("refused", response.error().message(),
-					response.error().code()));
+				answer.completeExceptionally(new BridgeRequestException(response.error().type(), response.error().message(),
+					response.error().code(), response.error().scope()));
 			else
 				answer.complete(response.data());
 		});
@@ -288,7 +317,7 @@ public final class Bridge implements AutoCloseable {
 		if (handler == null) {
 			if (call.waiting())
 				client.send(new Frame.CallResult(call.id(), com.google.gson.JsonNull.INSTANCE, new Frame.Result.Failure(
-					"no-handler", "This server has no function '" + call.function() + "'", 0)));
+					"no such function", "This server has no function '" + call.function() + "'", 0)));
 			return;
 		}
 		platform.runOnMain(() -> {
@@ -507,6 +536,7 @@ public final class Bridge implements AutoCloseable {
 			platform.log(Level.INFO, "Bridge: connected to " + welcome.bot().name());
 			publishCommands();
 			publishSubscriptions();
+			publishFunctions();
 			sendSnapshot();
 			platform.runOnMain(() -> listeners.forEach(listener -> listener.onConnect(welcome.bot())));
 		}
@@ -559,6 +589,10 @@ public final class Bridge implements AutoCloseable {
 					platform.runOnMain(() -> listeners.forEach(listener ->
 						listener.onScopeChanged(update.scope(), update.listen())));
 				}
+				case Frame.Functions declared -> {
+					botFunctions = List.copyOf(declared.functions());
+					platform.runOnMain(() -> listeners.forEach(listener -> listener.onBotFunctions(declared.functions())));
+				}
 				case Frame.CallResult response -> {
 					CompletableFuture<Frame.CallResult> future = asks.remove(response.id());
 					if (future != null)
@@ -583,6 +617,7 @@ public final class Bridge implements AutoCloseable {
 			boolean wasConnected = state == State.CONNECTED;
 			state = State.CONNECTING;
 			bot = null;
+			botFunctions = null;
 			failPending("disconnected");
 			if (wasConnected) {
 				platform.log(Level.WARNING, "Bridge: lost the bot (" + reason + "); reconnecting");

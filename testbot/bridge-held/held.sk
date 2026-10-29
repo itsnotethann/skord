@@ -2,7 +2,7 @@
 # The queue is capped at 5 events here.
 
 on ready:
-	start server process "held"
+	start server process "held" allowing "call"
 	fire test boost "1"
 	wait 600 milliseconds
 
@@ -16,7 +16,7 @@ on ready:
 	fire test boost "4"
 	set {_q::*} to held events of server "held"
 	mark "queued after the restart: %size of {_q::*}%"
-	start server process "held"
+	start server process "held" allowing "call"
 	wait 600 milliseconds
 	set {_q::*} to held events of server "held"
 	mark "queued after delivery: %size of {_q::*}%"
@@ -27,7 +27,7 @@ on ready:
 	kill server process "held"
 	set {_q::*} to held events of server "held"
 	mark "queued after a missing ack: %size of {_q::*}%"
-	start server process "held"
+	start server process "held" allowing "call"
 	wait 600 milliseconds
 	set {_q::*} to held events of server "held"
 	mark "queued after the redelivery: %size of {_q::*}%"
@@ -37,12 +37,20 @@ on ready:
 	wait 400 milliseconds
 	kill server process "held"
 	fire test boost "7"
-	start server process "held"
+	start server process "held" allowing "call"
 	wait 600 milliseconds
 	release gate "g" of server process "held"
 	wait 400 milliseconds
 	set {_q::*} to held events of server "held"
 	mark "queued after the mid-handler death: %size of {_q::*}%"
+
+	fire test boost "8"
+	wait 300 milliseconds
+	set {_q::*} to held events of server "held"
+	mark "queued during the call: %size of {_q::*}%"
+	wait 700 milliseconds
+	set {_q::*} to held events of server "held"
+	mark "queued after the call: %size of {_q::*}%"
 
 	# Past the cap the oldest are dropped and logged.
 	kill server process "held"
@@ -58,7 +66,7 @@ on ready:
 	set {_d::*} to held drops of server "held"
 	loop {_d::*}:
 		mark "logged: %loop-value%"
-	start server process "held"
+	start server process "held" allowing "call"
 	wait 800 milliseconds
 	set {_q::*} to held events of server "held"
 	mark "queued at the end: %size of {_q::*}%"

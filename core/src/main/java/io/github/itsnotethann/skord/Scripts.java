@@ -11,6 +11,7 @@ import ch.njol.skript.ScriptLoader;
 import ch.njol.skript.Skript;
 import ch.njol.skript.SkriptConfig;
 import ch.njol.skript.log.TimingLogHandler;
+import io.github.itsnotethann.skord.bridge.BridgeHost;
 import io.github.itsnotethann.skord.command.CommandSync;
 import org.skriptlang.skript.lang.script.Script;
 import org.slf4j.Logger;
@@ -130,8 +131,17 @@ public final class Scripts {
 	// Loading may finish on a loader thread; the registry is read on the script thread.
 	private static CompletableFuture<Void> sync() {
 		CompletableFuture<Void> synced = new CompletableFuture<>();
-		Skript.scheduler().sync(() -> CommandSync.sync().whenComplete((sent, error) -> synced.complete(null)), 0, -1);
+		Skript.scheduler().sync(() -> {
+			publishFunctions();
+			CommandSync.sync().whenComplete((sent, error) -> synced.complete(null));
+		}, 0, -1);
 		return synced;
+	}
+
+	public static void publishFunctions() {
+		BridgeHost host = BridgeHost.installed();
+		if (host != null && host.router() != null)
+			host.router().calls().publishAll();
 	}
 
 	private static CompletableFuture<Void> missing(String message) {

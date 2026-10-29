@@ -46,6 +46,30 @@ final class ProtocolDrift {
 			}
 		}
 		problems.addAll(roundTrips());
+		problems.addAll(boostKind());
+		return problems;
+	}
+
+	static List<String> boostKind() {
+		List<String> problems = new ArrayList<>();
+		io.github.itsnotethann.skord.discord.EventSpec.Kind kind = io.github.itsnotethann.skord.discord.EventSpec.Kind.BOOST_START;
+		if (!"boost-start".equals(kind.wire()))
+			problems.add("BOOST_START goes on the wire as '" + kind.wire() + "', the server module expects 'boost-start'");
+		if (kind.listen() != io.github.itsnotethann.skord.protocol.Listen.BOOSTS)
+			problems.add("BOOST_START needs the boosts listen scope, not " + kind.listen());
+		try {
+			Class.forName(io.github.itsnotethann.skord.JdaEventBus.class.getName());
+		} catch (ClassNotFoundException e) {
+			problems.add("JdaEventBus is missing: " + e.getMessage());
+		}
+		if (!io.github.itsnotethann.skord.discord.HeldKinds.heldable(kind)) {
+			problems.add("BOOST_START has no held id registered");
+		} else {
+			String id = io.github.itsnotethann.skord.discord.HeldKinds.id(kind,
+				java.util.Map.of("guildId", "g1", "userId", "u1", "startEpoch", 1700000000L));
+			if (!"boost:g1:u1:1700000000".equals(id))
+				problems.add("BOOST_START held id is '" + id + "', the server module expects boost:<guild>:<user>:<startEpoch>");
+		}
 		return problems;
 	}
 

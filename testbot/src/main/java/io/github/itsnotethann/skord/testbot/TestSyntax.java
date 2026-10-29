@@ -71,10 +71,11 @@ final class TestSyntax {
 			"fake server %string% declares command %string% [with arguments %-string%] and behaviour %string%");
 		Skript.registerEffect(EffRestartBot.class, "simulate a bot restart");
 		Skript.registerEffect(EffFakeServerData.class,
-			"fake server %string% sends message %string% [with %-string%]",
-			"fake server %string% listens for message %string%",
-			"fake server %string% answers request %string% with %string%");
-		Skript.registerEffect(EffFakeAsk.class, RestEffect.rest("fake server %string% asks the bot for %string% [with %-string%]"));
+			"fake server %string% sends call %string% [with %-string%]",
+			"fake server %string% records function %string%",
+			"fake server %string% offers function %string% answering %string%");
+		Skript.registerEffect(EffFakeAsk.class, RestEffect.rest("fake server %string% calls %string% on (the bot|server %-string%) [with %-string%]"));
+		Skript.registerEffect(EffFakeFunctions.class, RestEffect.rest("fake server %string% declares functions %string%"));
 		Skript.registerExpression(ExprRejections.class, String.class, ExpressionType.SIMPLE,
 			"[the] rejections of fake server %string%");
 		Skript.registerEffect(EffServerProcess.class,
@@ -482,11 +483,11 @@ Skript.eventBus().fire(new SlashEvent(command, interaction, values, invoker, nul
 				return;
 			switch (action) {
 				case 0 -> {
-					if (!TestBridge.sendMessage(serverName, thing, value))
+					if (!TestBridge.sendCall(serverName, thing, value))
 						Skript.warning("fake server '" + serverName + "' could not send '" + thing + "'");
 				}
-				case 1 -> TestBridge.listen(serverName, thing, script);
-				default -> TestBridge.answer(serverName, thing, value == null ? "" : value);
+				case 1 -> TestBridge.record(serverName, thing, script);
+				default -> TestBridge.offer(serverName, thing, value == null ? "null" : value);
 			}
 		}
 
@@ -501,6 +502,7 @@ Skript.eventBus().fire(new SlashEvent(command, interaction, values, invoker, nul
 
 		private Expression<String> server;
 		private Expression<String> request;
+		private @Nullable Expression<String> target;
 		private @Nullable Expression<String> data;
 
 		@Override
@@ -508,7 +510,8 @@ Skript.eventBus().fire(new SlashEvent(command, interaction, values, invoker, nul
 		protected boolean initRest(Expression<?>[] exprs, int matchedPattern, ParseResult parseResult) {
 			server = (Expression<String>) exprs[0];
 			request = (Expression<String>) exprs[1];
-			data = (Expression<String>) exprs[2];
+			target = (Expression<String>) exprs[2];
+			data = (Expression<String>) exprs[3];
 			return true;
 		}
 
@@ -518,12 +521,39 @@ Skript.eventBus().fire(new SlashEvent(command, interaction, values, invoker, nul
 			String what = request.getSingle(event);
 			if (name == null || what == null)
 				return null;
-			return TestBridge.ask(name, what, data == null ? null : data.getSingle(event));
+			return TestBridge.call(name, target == null ? null : target.getSingle(event), what,
+				data == null ? null : data.getSingle(event));
 		}
 
 		@Override
 		public String toString(@Nullable PlatformEvent event, boolean debug) {
-			return "fake server asks the bot for " + request.toString(event, debug);
+			return "fake server calls " + request.toString(event, debug) + " on the bot";
+		}
+	}
+
+	public static final class EffFakeFunctions extends RestEffect {
+
+		private Expression<String> server;
+		private Expression<String> names;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		protected boolean initRest(Expression<?>[] exprs, int matchedPattern, ParseResult parseResult) {
+			server = (Expression<String>) exprs[0];
+			names = (Expression<String>) exprs[1];
+			return true;
+		}
+
+		@Override
+		protected @Nullable CompletionStage<?> request(PlatformEvent event) {
+			String name = server.getSingle(event);
+			String list = names.getSingle(event);
+			return name == null || list == null ? null : TestBridge.declareFunctions(name, list);
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "fake server declares functions " + names.toString(event, debug);
 		}
 	}
 

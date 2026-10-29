@@ -102,7 +102,7 @@ val sharedScripts by tasks.registering(JavaExec::class) {
 	dependsOn(tasks.classes)
 	classpath = sourceSets.main.get().runtimeClasspath
 	mainClass.set("io.github.itsnotethann.skord.testbot.TestBot")
-	systemProperty("skord.ack-watchdog-ms", "300")
+	systemProperty("skord.ack-watchdog-ms", "1500")
 	args(layout.projectDirectory.dir("bridge-shared").asFile.absolutePath,
 		layout.buildDirectory.dir("sharedtest").get().asFile.absolutePath,
 		layout.projectDirectory.dir("server-shared").asFile.absolutePath)
@@ -111,9 +111,22 @@ val sharedScripts by tasks.registering(JavaExec::class) {
 	outputs.upToDateWhen { false }
 }
 
+// Shared functions that reach every server: its own run, so no other script has a server connected to answer.
+val functionScripts by tasks.registering(JavaExec::class) {
+	group = "verification"
+	dependsOn(tasks.classes)
+	classpath = sourceSets.main.get().runtimeClasspath
+	mainClass.set("io.github.itsnotethann.skord.testbot.TestBot")
+	systemProperty("skord.ack-watchdog-ms", "300")
+	args(layout.projectDirectory.dir("bridge-functions").asFile.absolutePath,
+		layout.buildDirectory.dir("functiontest").get().asFile.absolutePath)
+	inputs.dir(layout.projectDirectory.dir("bridge-functions"))
+	outputs.upToDateWhen { false }
+}
+
 // One command runs all of it: the scripts, then the bridge, then the scripts that use it.
 botTest {
-	dependsOn(bridgeTest, bridgeScripts, remoteScripts, heldScripts, sharedScripts)
+	dependsOn(bridgeTest, bridgeScripts, remoteScripts, heldScripts, sharedScripts, functionScripts)
 }
 
 tasks.check {

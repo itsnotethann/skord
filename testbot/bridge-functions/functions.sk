@@ -1,0 +1,36 @@
+
+on ready:
+	connect fake server "fast1" allowing "call"
+	connect fake server "fast2" allowing "call"
+	connect fake server "slow" allowing "call"
+	connect fake server "mute"
+	fake server "fast1" offers function "who" answering "[""one""]"
+	fake server "fast2" offers function "who" answering "2"
+	fake server "slow" offers function "who" answering "!hang"
+	fake server "fast2" records function "audit"
+
+	who() from all servers and store it in {_all::*}
+	mark "answers: %{_all::fast1::1}% and %{_all::fast2}%"
+	mark "failed: %the servers that failed in the last call%"
+	mark "first error: %error type of last request error%"
+
+	fake server "fast1" calls "ping" on the bot and store it in {_p}
+	mark "in scope: %{_p}%"
+	fake server "mute" calls "ping" on the bot and store it in {_p}
+	mark "out of scope: %error type of last request error%, missing %missing scope of last request error%"
+
+	fake server "fast1" calls "who" on server "fast2" and store it in {_r}
+	mark "relayed: %{_r}%"
+	fake server "fast1" calls "audit" on server "fast2" with "[""allowed""]" and store it in {_r}
+	fake server "mute" calls "audit" on server "fast2" with "[""blocked""]" and store it in {_r}
+	mark "relay out of scope: %error type of last request error%"
+	fake server "fast1" calls "nothing" on server "fast2" and store it in {_r}
+	mark "relay no function: %error type of last request error%"
+	fake server "fast1" calls "who" on server "nowhere" and store it in {_r}
+	mark "relay offline: %error type of last request error%"
+	fake server "fast1" calls "who" on server "slow" and store it in {_r}
+	mark "relay timeout: %error type of last request error%"
+	wait 200 milliseconds
+
+shared function ping() :: text:
+	return "pong"

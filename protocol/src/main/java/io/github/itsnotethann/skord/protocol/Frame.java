@@ -399,7 +399,14 @@ public sealed interface Frame {
 		}
 	}
 
-	record Call(String id, String function, JsonElement args, boolean waiting) implements Frame {
+	record Call(String id, String function, JsonElement args, boolean waiting, @Nullable String target) implements Frame {
+
+		/** {@link #target} when a call is for every online server rather than one. */
+		public static final String ALL = "*";
+
+		public Call(String id, String function, JsonElement args, boolean waiting) {
+			this(id, function, args, waiting, null);
+		}
 
 		@Override
 		public String type() {
@@ -412,6 +419,8 @@ public sealed interface Frame {
 			out.addProperty("function", function);
 			out.add("args", args == null ? JsonNull.INSTANCE : args);
 			out.addProperty("wait", waiting);
+			if (target != null)
+				out.addProperty("target", target);
 		}
 	}
 

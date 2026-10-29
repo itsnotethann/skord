@@ -1,14 +1,15 @@
-join from lobby: Ada
+join: Ada
 stats: Ada has 3 kills
-nested: Ada has 3 kills, tag x
-lobby got message season reset: now
+squad: Ada, Grace and Linus of 3 (3)
+lobby got call resetSeason: ["now"]
 players: Ada, Grace and Linus (3)
-status: 19.5 tps, 3 online
-broken: refused, fake server refusal
-unanswered: refused
+tps: 19.5
+broken: error, fake server refusal
+unknown: no such function
 silent: timed out
+alias: timed out
 bot says: Ada and Grace
-profile: Ada level 7
-no handler: refused
-send offline: offline
+level: 7
+no function: no such function
 ask offline: offline
+send offline: no pause

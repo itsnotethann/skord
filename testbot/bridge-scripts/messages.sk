@@ -1,70 +1,59 @@
-# Messages and requests, both ways. The bot is real, the server a real bridge client over a local WebSocket.
-# Different server and request names from commands.sk: the two scripts share one bot and run side by side.
 
-on bridge message "join" from server "lobby":
-	mark "join from %event-server%: %data%"
+shared function joined(player: text):
+	mark "join: %{_player}%"
 
-on bridge message "stats" from server "lobby":
-	set {_d::*} to data
-	mark "stats: %{_d::name}% has %{_d::kills}% kills"
+shared function stats(name: text, kills: number):
+	mark "stats: %{_name}% has %{_kills}% kills"
 
-on bridge message "nested" from server "lobby":
-	set {_n::*} to data
-	mark "nested: %{_n::player::name}% has %{_n::player::stats::kills}% kills, tag %{_n::tag}%"
+shared function squad(names: texts, size: number):
+	mark "squad: %{_names::*}% of %{_size}% (%size of {_names::*}%)"
 
-on bridge request "online players":
-	answer with "Ada" and "Grace"
+shared function onlinePlayers() :: texts:
+	return "Ada" and "Grace"
 
-on bridge request "profile":
-	set {_p::name} to "Ada"
-	set {_p::level} to 7
-	answer with {_p::*}
+shared function level(name: text) :: number:
+	return 7
 
 on ready:
-	connect fake server "lobby"
+	connect fake server "lobby" allowing "call"
 
-	# Server to bot: a scalar, then an object (fields keep their names).
-	fake server "lobby" sends message "join" with "Ada"
+	fake server "lobby" sends call "joined" with "[""Ada""]"
 	wait 150 milliseconds
-	fake server "lobby" sends message "stats" with "name=Ada;kills=3"
+	fake server "lobby" sends call "stats" with "[""Ada"",3]"
 	wait 150 milliseconds
-
-	# Nested fields arrive as nested list variables.
-	fake server "lobby" sends message "nested" with "player::name=Ada;player::stats::kills=3;tag=x"
+	fake server "lobby" sends call "squad" with "[[""Ada"",""Grace"",""Linus""],3]"
 	wait 150 milliseconds
 
-	# Bot to server, recorded by the server.
-	fake server "lobby" listens for message "season reset"
-	send bridge message "season reset" with "now" to server "lobby"
+	fake server "lobby" records function "resetSeason"
+	resetSeason("now") from "lobby" without waiting
 	wait 150 milliseconds
 
-	# The server answers the bot: a list, an object, and the two ways to fail.
-	fake server "lobby" answers request "players" with "Ada,Grace,Linus"
-	fake server "lobby" answers request "status" with "tps=19.5;online=3"
-	fake server "lobby" answers request "broken" with "!fail"
-	fake server "lobby" answers request "silent" with "!hang"
-	ask server "lobby" for "players" and store it in {_players::*}
+	fake server "lobby" offers function "players" answering "[""Ada"",""Grace"",""Linus""]"
+	fake server "lobby" offers function "tps" answering "19.5"
+	fake server "lobby" offers function "broken" answering "!fail"
+	fake server "lobby" offers function "silent" answering "!hang"
+	players() from "lobby" and store it in {_players::*}
 	mark "players: %{_players::*}% (%size of {_players::*}%)"
-	ask server "lobby" for "status" and store it in {_status::*}
-	mark "status: %{_status::tps}% tps, %{_status::online}% online"
-	ask server "lobby" for "broken" and store it in {_x}
+	tps() from "lobby" and store it in {_tps}
+	mark "tps: %{_tps}%"
+	broken() from "lobby" and store it in {_x}
 	mark "broken: %error type of last request error%, %last request error%"
-	ask server "lobby" for "nobody knows" and store it in {_x}
-	mark "unanswered: %error type of last request error%"
-	ask server "lobby" for "silent" and store it in {_x}
+	nobodyKnows() from "lobby" and store it in {_x}
+	mark "unknown: %error type of last request error%"
+	silent() from "lobby" and store it in {_x}
 	mark "silent: %error type of last request error%"
+	set {_alias} to last discord error
+	mark "alias: %error type of {_alias}%"
 
-	# The bot answers the server: a list, a nested object, and no handler.
-	fake server "lobby" asks the bot for "online players" and store it in {_a::*}
+	fake server "lobby" calls "onlinePlayers" on the bot and store it in {_a::*}
 	mark "bot says: %{_a::*}%"
-	fake server "lobby" asks the bot for "profile" and store it in {_b::*}
-	mark "profile: %{_b::name}% level %{_b::level}%"
-	fake server "lobby" asks the bot for "no such thing" and store it in {_c}
-	mark "no handler: %error type of last request error%"
+	fake server "lobby" calls "level" on the bot with "[""Ada""]" and store it in {_b}
+	mark "level: %{_b}%"
+	fake server "lobby" calls "noSuchThing" on the bot and store it in {_c}
+	mark "no function: %error type of last request error%"
 
-	# A server that has gone.
 	disconnect fake server "lobby"
-	send bridge message "season reset" with "now" to server "lobby"
-	mark "send offline: %error type of last request error%"
-	ask server "lobby" for "players" and store it in {_x}
+	players() from "lobby" and store it in {_x}
 	mark "ask offline: %error type of last request error%"
+	resetSeason("now") from "lobby" without waiting
+	mark "send offline: no pause"

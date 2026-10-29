@@ -75,6 +75,29 @@ final class RemoteCommandStore {
 		return out;
 	}
 
+	void saveFunctions(String server, List<Frame.FunctionSpec> functions) {
+		JsonObject written = new JsonObject();
+		new Frame.Functions(functions).write(written);
+		JsonObject root = read(server);
+		root.add("functions", written.get("functions"));
+		write(server, root, "function list");
+	}
+
+	@Nullable List<Frame.FunctionSpec> loadFunctions(String server) {
+		JsonElement saved = read(server).get("functions");
+		if (saved == null || !saved.isJsonArray())
+			return null;
+		JsonObject wrapper = new JsonObject();
+		wrapper.addProperty("type", "functions");
+		wrapper.add("functions", saved);
+		try {
+			return FrameCodec.decode(wrapper.toString()) instanceof Frame.Functions functions ? functions.functions() : null;
+		} catch (FrameCodec.FrameException e) {
+			LOGGER.warn("Ignoring the saved function list of {}: {}", server, e.getMessage());
+			return null;
+		}
+	}
+
 	void saveLastSeen(String server, Instant time) {
 		JsonObject root = read(server);
 		root.addProperty("lastSeen", time.toString());

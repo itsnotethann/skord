@@ -67,7 +67,7 @@ if last discord error is set:
 
 - `error type of`: `missing permission`, `missing access`, `hierarchy` (the bot's role is too
   low), `unknown channel`, `unknown message`, `unknown member`, `unknown role`, `unknown user`,
-  `invalid input`, `timed out` or `other`.
+  `invalid input`, `timed out`, `offline`, `no such function`, `error`, `out of scope` or `other`.
 - `missing permission of`: a permission such as `manage channels`. Set when skord's own check
   caught it before sending; unset when Discord refused, since Discord doesn't say which one.
 - `error code of`: Discord's numeric code (`50013`), for anything the types don't name.
@@ -75,6 +75,43 @@ if last discord error is set:
 
 Add `without waiting` to any request to send it without pausing:
 `send "Logged." to {log-channel} without waiting`.
+
+## Shared functions
+
+A game server linked to the bot can call the bot, the bot can call it, and servers can call each
+other, with a function declared on one side:
+
+```
+shared function onlinePlayers() :: texts:
+	return "Ada" and "Grace"
+```
+
+and called from the other:
+
+```
+onlinePlayers() from "survival" and store it in {_players::*}
+onlinePlayers() from "survival" without waiting
+onlinePlayers() from all servers and store it in {_players::*}
+```
+
+- Parameters and results are text, numbers, booleans, Discord objects, or lists of those. Anything
+  else is a load error.
+- A call pauses like any request. `from "bot"` (on a server) is the bot; `from "<other server>"` goes
+  through the bot, and needs the `call` scope on the calling server's link.
+- `from all servers` waits until every connected server has answered or timed out, and stores one
+  answer per server under its name: `{_players::survival::1}`. `the servers that failed in the last
+  call` lists the ones that didn't answer, and `last request error` holds the first of their errors.
+- A failure lands in `last request error` (also written `last discord error`), with `error type of`
+  `timed out`, `offline`, `no such function`, `error` or `out of scope`. `bridge.timeout` in
+  `skord.yml` sets how long a call waits (5 seconds by default). A call `without waiting` that fails
+  is logged, not stored.
+- Each side publishes its functions when it connects and after every reload. The bot saves each
+  server's list in `.skord/servers/<name>.json`; once a list is known, a call to a name that isn't
+  on it is a load error. Before that it loads, and fails at run time with `no such function`.
+- The bot also offers `linked(discordId, uuid, name)` and `unlinked(discordId)`, which a server calls
+  to keep the bot's Discord-to-player cache current. When the bot meets a Discord account it doesn't
+  know, it asks the connected servers' `linkedPlayer(discordId)`, if they declare it, before routing
+  a shared command.
 
 See `core/src/main/resources/skord/examples/` for complete scripts.
 

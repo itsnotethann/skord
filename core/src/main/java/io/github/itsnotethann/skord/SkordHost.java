@@ -134,6 +134,7 @@ public final class SkordHost implements PlatformProvider {
 				: "Logging in...");
 			try {
 				host.jda = JDABuilder.createLight(config.token(), config.intents())
+					.setRawEventsEnabled(true)
 					.addEventListeners(host.eventBus)
 					.build()
 					.awaitReady();
@@ -183,9 +184,12 @@ public final class SkordHost implements PlatformProvider {
 
 	// Runs on the script thread. The command sync is a request like any other: it doesn't hold up going live.
 	private void goLive() {
+		Scripts.publishFunctions();
 		CommandSync.sync();
 		eventBus.goLive();
 		eventBus.fire(new ReadyEvent());
+		java.util.concurrent.CompletableFuture.runAsync(() -> eventBus.sweepBoosters(SkordHost.jda()),
+			java.util.concurrent.CompletableFuture.delayedExecutor(120, java.util.concurrent.TimeUnit.SECONDS));
 	}
 
 	private void boot(Runnable whenLoaded) throws InterruptedException {

@@ -22,6 +22,8 @@ import io.github.itsnotethann.skord.event.SkordEvent;
 import io.github.itsnotethann.skord.event.SlashEvent;
 import io.github.itsnotethann.skord.jda.JdaRefs;
 import net.dv8tion.jda.api.events.GenericEvent;
+import net.dv8tion.jda.api.events.RawGatewayEvent;
+import net.dv8tion.jda.api.utils.data.DataObject;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import org.jetbrains.annotations.Nullable;
@@ -51,6 +53,11 @@ public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.Ev
 	// Gateway events that arrive before scripts finish loading have no triggers to run; drop them.
 	private volatile boolean live;
 
+	static {
+		io.github.itsnotethann.skord.discord.HeldKinds.register(EventSpec.Kind.BOOST_START,
+			data -> "boost:" + data.get("guildId") + ":" + data.get("userId") + ":" + data.get("startEpoch"));
+	}
+
 	public JdaEventBus(ScriptThread scriptThread) {
 		this.scriptThread = scriptThread;
 	}
@@ -69,9 +76,54 @@ public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.Ev
 	public void onEvent(GenericEvent event) {
 		if (!live)
 			return;
+		if (event instanceof RawGatewayEvent raw) {
+			if ("GUILD_MEMBER_UPDATE".equals(raw.getType()))
+				boostFrom(raw.getPayload());
+			return;
+		}
 		SkordEvent wrapped = wrap(event);
 		if (wrapped != null)
 			fire(wrapped);
+	}
+
+	private final java.util.Set<String> boostsSeen = ConcurrentHashMap.newKeySet();
+
+	private void boostFrom(DataObject member) {
+		if (member.isNull("premium_since") || !member.hasKey("guild_id") || member.isNull("user"))
+			return;
+		long start;
+		try {
+			start = java.time.OffsetDateTime.parse(member.getString("premium_since")).toEpochSecond();
+		} catch (java.time.format.DateTimeParseException e) {
+			return;
+		}
+		announceBoost(member.getString("guild_id"), member.getObject("user").getString("id"), start);
+	}
+
+	private void announceBoost(String guildId, String userId, long start) {
+		if (boostsSeen.size() > 10_000)
+			boostsSeen.clear();
+		if (!boostsSeen.add(guildId + ":" + userId + ":" + start))
+			return;
+		Map<String, Object> data = new HashMap<>();
+		data.put("guildId", guildId);
+		data.put("userId", userId);
+		data.put("startEpoch", start);
+		publishRaw(new DiscordEvent(EventSpec.Kind.BOOST_START, data));
+	}
+
+	public void sweepBoosters(net.dv8tion.jda.api.JDA jda) {
+		for (net.dv8tion.jda.api.entities.Guild guild : jda.getGuilds()) {
+			try {
+				guild.loadMembers(found -> {
+					if (found.getTimeBoosted() != null)
+						announceBoost(guild.getId(), found.getUser().getId(), found.getTimeBoosted().toEpochSecond());
+				});
+			} catch (RuntimeException e) {
+				org.slf4j.LoggerFactory.getLogger(JdaEventBus.class)
+					.warn("Could not sweep boosters in {}: {}", guild.getName(), e.getMessage());
+			}
+		}
 	}
 
 	private static @Nullable SkordEvent wrap(GenericEvent event) {
