@@ -158,6 +158,8 @@ public final class SkordHost implements PlatformProvider {
 				throw e;
 			}
 			LOGGER.info("Logged in as {}", host.jda.getSelfUser().getName());
+			LOGGER.info("In {} guild(s): {}", host.jda.getGuilds().size(),
+				host.jda.getGuilds().stream().map(guild -> guild.getName() + " (" + guild.getId() + ")").toList());
 			CommandSync.install(directory.resolve(".skord").resolve("commands.hash"), config.devGuild(),
 				CommandSync.jda(host.jda));
 				host.bridge = BridgeHost.start(directory, config.bridge(),
