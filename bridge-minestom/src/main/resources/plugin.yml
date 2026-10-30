@@ -1,0 +1,4 @@
+name: skord
+version: ${version}
+main: io.github.itsnotethann.skord.bridge.minestom.SkordAddon
+api-version: 1.19

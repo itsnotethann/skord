@@ -1,0 +1,5 @@
+mode: remote
+url: ws://127.0.0.1:18765
+name: survival
+secret: ""
+timeout: 5

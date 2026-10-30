@@ -1,0 +1,7 @@
+mode: embedded
+token: ""
+intents:
+  - GUILD_MESSAGES
+  - DIRECT_MESSAGES
+  - MESSAGE_CONTENT
+dev-guild: ""

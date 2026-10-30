@@ -1,0 +1,5 @@
+name: Skord
+version: ${version}
+main: io.github.itsnotethann.skord.bridge.paper.SkordPlugin
+api-version: "26.2"
+load: STARTUP
