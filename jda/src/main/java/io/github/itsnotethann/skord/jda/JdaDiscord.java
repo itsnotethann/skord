@@ -8,7 +8,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import io.github.itsnotethann.skord.JdaEventBus;
-import io.github.itsnotethann.skord.SkordHost;
 import io.github.itsnotethann.skord.command.JdaSpecs;
 import io.github.itsnotethann.skord.discord.CategoryRef;
 import io.github.itsnotethann.skord.discord.ChannelRef;
@@ -41,13 +40,15 @@ import org.jetbrains.annotations.Nullable;
 public final class JdaDiscord implements Discord, DiscordActions, DiscordEvents {
 
 	private final JdaEventBus bus;
+	private final JdaHost host;
 
-	public JdaDiscord(JdaEventBus bus) {
+	public JdaDiscord(JdaEventBus bus, JdaHost host) {
 		this.bus = bus;
+		this.host = host;
 	}
 
-	private static JDA jda() {
-		return SkordHost.jda();
+	private JDA jda() {
+		return host.jda();
 	}
 
 	@Override

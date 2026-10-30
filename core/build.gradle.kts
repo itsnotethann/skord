@@ -17,13 +17,10 @@ val uncommon = "1.0.0-alpha.1"
 dependencies {
 	api(project(":protocol"))
 	api(project(":discord-api"))
+	api(project(":jda"))
 	api(project(":syntax"))
 	// api: testbot compiles against the engine and JDA through core.
 	api("com.github.itsnotethann.uncommonskript:common:$uncommon")
-	api("net.dv8tion:JDA:6.4.2") {
-		exclude(module = "opus-java")
-		exclude(module = "tink")
-	}
 	implementation("org.yaml:snakeyaml:1.32")
 	implementation("org.java-websocket:Java-WebSocket:1.6.0")
 }

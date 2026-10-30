@@ -19,6 +19,7 @@ import ch.njol.skript.Skript;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import io.github.itsnotethann.skord.JdaEventBus;
 import io.github.itsnotethann.skord.event.ServerConnectEvent;
 import io.github.itsnotethann.skord.event.ServerDisconnectEvent;
 import io.github.itsnotethann.skord.shared.SharedFunctions;
@@ -174,6 +175,14 @@ public final class BridgeRouter implements BridgeServer.Listener {
 	}
 
 	/** The router a slash command for a server-owned command goes through, if the bridge is running. */
+	public static final JdaEventBus.Forwarder FORWARDER = (owners, slash, delayed) -> {
+		BridgeRouter router = current();
+		if (router == null)
+			return false;
+		router.forward(owners, slash, delayed);
+		return true;
+	};
+
 	public static @Nullable BridgeRouter current() {
 		return current;
 	}

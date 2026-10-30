@@ -7,10 +7,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import ch.njol.skript.effects.Delay;
 import ch.njol.skript.lang.Trigger;
-import io.github.itsnotethann.skord.bridge.BridgeRouter;
 import io.github.itsnotethann.skord.command.CommandRegistry;
 import io.github.itsnotethann.skord.discord.DiscordEvent;
 import io.github.itsnotethann.skord.discord.DiscordEvents;
@@ -20,6 +20,7 @@ import io.github.itsnotethann.skord.event.MessageEvent;
 import io.github.itsnotethann.skord.event.ReadyEvent;
 import io.github.itsnotethann.skord.event.SkordEvent;
 import io.github.itsnotethann.skord.event.SlashEvent;
+import io.github.itsnotethann.skord.jda.JdaHost;
 import io.github.itsnotethann.skord.jda.JdaRefs;
 import net.dv8tion.jda.api.events.GenericEvent;
 import net.dv8tion.jda.api.events.RawGatewayEvent;
@@ -47,7 +48,14 @@ public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.Ev
 	private record Subscriber(EventSpec spec, Consumer<DiscordEvent> handler) {
 	}
 
-	private final ScriptThread scriptThread;
+	/** Hands a slash command that a game server owns to that server. Returns false when nobody can take it. */
+	public interface Forwarder {
+		boolean forward(List<String> owners, SlashEvent slash, boolean delayed);
+	}
+
+	private final JdaHost host;
+	private volatile @Nullable Forwarder forwarder;
+	private volatile @Nullable Supplier<EventBus> delegate;
 	private final Map<Class<?>, Channel> channels = new ConcurrentHashMap<>();
 	private final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
 	// Gateway events that arrive before scripts finish loading have no triggers to run; drop them.
@@ -58,8 +66,17 @@ public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.Ev
 			data -> "boost:" + data.get("guildId") + ":" + data.get("userId") + ":" + data.get("startEpoch"));
 	}
 
-	public JdaEventBus(ScriptThread scriptThread) {
-		this.scriptThread = scriptThread;
+	public JdaEventBus(JdaHost host) {
+		this.host = host;
+	}
+
+	public void forwarder(@Nullable Forwarder forwarder) {
+		this.forwarder = forwarder;
+	}
+
+	/** Sends script-facing events to a host's own bus instead of this one's channels. For a server that runs skord inside it. */
+	public void delegate(@Nullable Supplier<EventBus> delegate) {
+		this.delegate = delegate;
 	}
 
 	public void goLive() {
@@ -143,10 +160,10 @@ public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.Ev
 
 	@Override
 	public void fire(PlatformEvent event) {
-		if (scriptThread.isPrimaryThread())
+		if (host.onScriptThread())
 			dispatch(event);
 		else
-			scriptThread.execute(() -> dispatch(event));
+			host.runOnScriptThread(() -> dispatch(event));
 	}
 
 	private void dispatch(PlatformEvent event) {
@@ -157,17 +174,20 @@ public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.Ev
 			if (trigger != null)
 				trigger.execute(slash);
 		}
-		Channel channel = channels.get(event.getClass());
-		if (channel != null)
-			channel.call(event);
+		Supplier<EventBus> outer = delegate;
+		if (outer != null) {
+			outer.get().fire(event);
+		} else {
+			Channel channel = channels.get(event.getClass());
+			if (channel != null)
+				channel.call(event);
+		}
 		publish(event);
 		// A server's command: the server runs it, and its own 'dispatched' settles the interaction.
 		if (!owners.isEmpty() && event instanceof SlashEvent slash) {
-			BridgeRouter router = BridgeRouter.current();
-			if (router != null) {
-				router.forward(owners, slash, Delay.isDelayed(event));
+			Forwarder current = forwarder;
+			if (current != null && current.forward(owners, slash, Delay.isDelayed(event)))
 				return;
-			}
 		}
 		if (event instanceof InteractionEvent interaction)
 			interaction.interaction().afterDispatch(Delay.isDelayed(event));
@@ -209,10 +229,10 @@ public final class JdaEventBus implements EventBus, net.dv8tion.jda.api.hooks.Ev
 
 	/** Hands a Discord event that has no script-facing {@link SkordEvent} to the subscribers. */
 	public void publishRaw(DiscordEvent published) {
-		if (scriptThread.isPrimaryThread())
+		if (host.onScriptThread())
 			deliver(published);
 		else
-			scriptThread.execute(() -> deliver(published));
+			host.runOnScriptThread(() -> deliver(published));
 	}
 
 	private void deliver(DiscordEvent published) {

@@ -22,7 +22,9 @@ import io.github.itsnotethann.skord.command.CommandSync;
 import io.github.itsnotethann.skord.protocol.Frame;
 import io.github.itsnotethann.skord.event.ReadyEvent;
 import io.github.itsnotethann.skord.discord.Discord;
+import io.github.itsnotethann.skord.bridge.BridgeRouter;
 import io.github.itsnotethann.skord.jda.JdaDiscord;
+import io.github.itsnotethann.skord.jda.JdaHost;
 import io.github.itsnotethann.skord.syntax.BridgeSyntax;
 import io.github.itsnotethann.skord.syntax.SkordSyntax;
 import net.dv8tion.jda.api.JDA;
@@ -58,7 +60,8 @@ public final class SkordHost implements PlatformProvider {
 
 	private final File directory;
 	private final ScriptThread scriptThread = new ScriptThread();
-	private final JdaEventBus eventBus = new JdaEventBus(scriptThread);
+	private final JdaHost jdaHost = new ScriptThreadHost(scriptThread, SkordHost::jda);
+	private final JdaEventBus eventBus = new JdaEventBus(jdaHost);
 	private final AtomicBoolean stopping = new AtomicBoolean();
 	private final AtomicInteger errors = new AtomicInteger();
 	private final PlatformEnvironment environment;
@@ -110,7 +113,8 @@ public final class SkordHost implements PlatformProvider {
 		Path directory = Path.of("").toAbsolutePath();
 		SkordHost host = new SkordHost(directory.toFile());
 		instance = host;
-		Discord.install(new JdaDiscord(host.eventBus));
+		host.eventBus.forwarder(BridgeRouter.FORWARDER);
+		Discord.install(new JdaDiscord(host.eventBus, host.jdaHost));
 
 		if (!check) {
 			Path configFile = directory.resolve("skord.yml");

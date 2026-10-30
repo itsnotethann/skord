@@ -1,0 +1,8 @@
+# Bridge-only syntax is refused when skord is embedded in a server, and the message says why.
+
+on ready:
+	if server "survival" is online:
+		mark "never runs"
+
+on server connect:
+	mark "never runs"

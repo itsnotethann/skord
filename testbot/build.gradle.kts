@@ -12,6 +12,7 @@ repositories {
 
 dependencies {
 	implementation(project(":core"))
+	implementation(project(":embedded"))
 	implementation(project(":bridge-api"))
 }
 
@@ -131,4 +132,39 @@ botTest {
 
 tasks.check {
 	dependsOn(botTest)
+}
+
+val stageEmbedded by tasks.registering(Sync::class) {
+	from(scripts)
+	from(layout.projectDirectory.dir("embedded-scripts"))
+	into(layout.buildDirectory.dir("embedded-scripts"))
+}
+
+// The bot-side scripts again, with the platform's embedded wiring in place of the standalone host: the server's own
+// event bus, no bridge, and the bridge-only syntax refused. Their .expected files are the bot's own.
+val embeddedScripts by tasks.registering(JavaExec::class) {
+	group = "verification"
+	dependsOn(tasks.classes, stageEmbedded)
+	classpath = sourceSets.main.get().runtimeClasspath
+	mainClass.set("io.github.itsnotethann.skord.testbot.TestBot")
+	systemProperty("skord.ack-watchdog-ms", "300")
+	systemProperty("skord.embedded", "true")
+	args(layout.buildDirectory.dir("embedded-scripts").get().asFile.absolutePath,
+		layout.buildDirectory.dir("embeddedtest").get().asFile.absolutePath)
+	inputs.dir(scripts)
+	inputs.dir(layout.projectDirectory.dir("embedded-scripts"))
+	outputs.upToDateWhen { false }
+}
+
+tasks.check {
+	dependsOn(embeddedScripts)
+}
+
+val stageEmbeddedFixtures by tasks.registering(Sync::class) {
+	from(layout.projectDirectory.dir("fixtures"))
+	into(layout.buildDirectory.dir("fixtures"))
+}
+
+embeddedScripts {
+	dependsOn(stageEmbeddedFixtures)
 }

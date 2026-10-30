@@ -18,6 +18,11 @@ import java.util.stream.Stream;
 import ch.njol.skript.Skript;
 import io.github.itsnotethann.skord.JdaEventBus;
 import io.github.itsnotethann.skord.ScriptThread;
+import io.github.itsnotethann.skord.ScriptThreadHost;
+import io.github.itsnotethann.skord.bridge.api.BridgePlatform;
+import io.github.itsnotethann.skord.embedded.Embedded;
+import io.github.itsnotethann.skord.jda.JdaHost;
+import io.github.itsnotethann.skord.bridge.BridgeRouter;
 import io.github.itsnotethann.skord.command.CommandSync;
 import io.github.itsnotethann.skord.event.ReadyEvent;
 import io.github.itsnotethann.skord.discord.Discord;
@@ -101,13 +106,28 @@ public final class TestBot implements PlatformProvider {
 		stageVariables(scripts, work);
 
 		ScriptThread scriptThread = new ScriptThread();
-		JdaEventBus eventBus = new JdaEventBus(scriptThread);
+		boolean embedded = Boolean.getBoolean("skord.embedded");
+		JdaHost jdaHost = new ScriptThreadHost(scriptThread, () -> {
+			throw new IllegalStateException("testbot has no JDA");
+		});
+		JdaEventBus eventBus = new JdaEventBus(jdaHost);
+		Embedded wired = null;
 		Platform.install(new TestBot(work.toFile(), scriptThread, eventBus));
-		FakeDiscord.bus(eventBus);
-		Discord.install(FakeDiscord.INSTANCE);
-		CommandSync.install(work.resolve(".skord").resolve("commands.hash"), 0, FakeDiscord.commandSink());
-		TestBridge.start(work, scriptThread);
-		TestBridge.registerSlowFunction();
+		if (embedded) {
+			JdaEventBus discordBus = new JdaEventBus(jdaHost);
+			wired = Embedded.attach(platform(work, scriptThread), scriptThread::isPrimaryThread, discordBus,
+				FakeDiscord.INSTANCE, FakeDiscord.commandSink(), 0);
+			FakeDiscord.bus(discordBus);
+			wired.installCommandSync();
+		} else {
+			eventBus.forwarder(BridgeRouter.FORWARDER);
+			FakeDiscord.bus(eventBus);
+			Discord.install(FakeDiscord.INSTANCE);
+			CommandSync.install(work.resolve(".skord").resolve("commands.hash"), 0, FakeDiscord.commandSink());
+			TestBridge.start(work, scriptThread);
+			TestBridge.registerSlowFunction();
+		}
+		Embedded embeddedWiring = wired;
 
 		CountDownLatch live = new CountDownLatch(1);
 		Throwable[] failure = new Throwable[1];
@@ -116,13 +136,21 @@ public final class TestBot implements PlatformProvider {
 				Skript skript = new Skript();
 				Skript.onRegistration(() -> {
 					SkordSyntax.register();
-					BridgeSyntax.register();
+					if (embeddedWiring != null)
+						Embedded.registerSyntax();
+					else
+						BridgeSyntax.register();
 					TestSyntax.register();
 				});
 				Skript.onFinishedLoading(() -> scriptThread.execute(() -> {
-					CommandSync.sync();
-					eventBus.goLive();
-					eventBus.fire(new ReadyEvent());
+					if (embeddedWiring != null) {
+						eventBus.goLive();
+						embeddedWiring.ready();
+					} else {
+						CommandSync.sync();
+						eventBus.goLive();
+						eventBus.fire(new ReadyEvent());
+					}
 					live.countDown();
 				}));
 				skript.setEnabled(true);
@@ -175,6 +203,30 @@ public final class TestBot implements PlatformProvider {
 		scriptThread.shutdown();
 		System.out.println(failures == 0 ? "BOTTEST PASS" : "BOTTEST FAIL: " + failures + " script(s)");
 		System.exit(failures == 0 ? 0 : 1);
+	}
+
+	private static BridgePlatform platform(Path work, ScriptThread scriptThread) {
+		return new BridgePlatform() {
+			@Override
+			public String name() {
+				return "testbot";
+			}
+
+			@Override
+			public Path dataDirectory() {
+				return work.resolve(".skord");
+			}
+
+			@Override
+			public void runOnMain(Runnable task) {
+				scriptThread.execute(task);
+			}
+
+			@Override
+			public void log(Level level, String message) {
+				org.slf4j.LoggerFactory.getLogger("skord").info(message);
+			}
+		};
 	}
 
 	private static void stage(Path source, Path work) throws IOException {
