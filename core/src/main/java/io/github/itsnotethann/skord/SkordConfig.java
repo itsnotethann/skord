@@ -34,6 +34,8 @@ public record SkordConfig(String token, EnumSet<GatewayIntent> intents, long dev
 		# Gateway intents: which events Discord sends the bot.
 		# message-content is privileged: also turn it on under Bot > Privileged Gateway Intents in the
 		# developer portal, or Discord refuses the connection.
+		# Member join and leave events and boosts need guild-members, which is privileged too
+		# (Server Members Intent).
 		intents:
 		  - guild-messages
 		  - direct-messages

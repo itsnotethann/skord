@@ -1,0 +1,12 @@
+on ready:
+	start server process "members" allowing "roles" listening to "members,boosts"
+	fire member join of user "444444444444444444" in guild "111111111111111111"
+	wait 1200 milliseconds
+	set {_out::*} to output of sk link "scope members --allow roles,members"
+	wait 300 milliseconds
+	fire member join of user "444444444444444444" in guild "111111111111111111"
+	wait 1200 milliseconds
+	fire boost of user "444444444444444444" in guild "111111111111111111" at 1700000000
+	wait 800 milliseconds
+	loop the fake moderation:
+		mark loop-value

@@ -100,6 +100,7 @@ final class TestSyntax {
 		Skript.registerExpression(ExprRefusals.class, String.class, ExpressionType.SIMPLE,
 		"[the] subscription refusals of fake server %string%");
 		TestHeldSyntax.register();
+		TestGuildSyntax.register();
 		}
 
 	static String scriptName(@Nullable Script script) {

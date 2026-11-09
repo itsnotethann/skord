@@ -193,9 +193,27 @@ public final class SkordHost implements PlatformProvider {
 		Scripts.publishFunctions();
 		CommandSync.sync();
 		eventBus.goLive();
+		warnMissingMembersIntent();
 		eventBus.fire(new ReadyEvent());
 		java.util.concurrent.CompletableFuture.runAsync(() -> eventBus.sweepBoosters(SkordHost.jda()),
 			java.util.concurrent.CompletableFuture.delayedExecutor(120, java.util.concurrent.TimeUnit.SECONDS));
+	}
+
+	private static void warnMissingMembersIntent() {
+		JDA current = jda();
+		if (current == null || current.getGatewayIntents().contains(GatewayIntent.GUILD_MEMBERS))
+			return;
+		List<String> needing = io.github.itsnotethann.skord.syntax.EventSpecs.current().stream()
+			.map(spec -> spec.kind())
+			.filter(kind -> kind == io.github.itsnotethann.skord.discord.EventSpec.Kind.MEMBER_JOIN
+				|| kind == io.github.itsnotethann.skord.discord.EventSpec.Kind.MEMBER_LEAVE
+				|| kind == io.github.itsnotethann.skord.discord.EventSpec.Kind.BOOST_START)
+			.map(kind -> kind.wire().replace('-', ' '))
+			.distinct()
+			.toList();
+		if (!needing.isEmpty())
+			LOGGER.warn("Scripts handle {} but skord.yml has no 'guild-members' intent, so Discord never sends them. Add it "
+				+ "under intents and turn on Server Members Intent in the developer portal.", needing);
 	}
 
 	private void boot(Runnable whenLoaded) throws InterruptedException {

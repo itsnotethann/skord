@@ -1,0 +1,23 @@
+# A role picker: /roles shows a menu, and picking toggles roles. Put your own role ids in the options.
+
+options:
+	red: 123456789012345678
+	blue: 234567890123456789
+
+slash command roles:
+	description: Pick your team
+	guild only: true
+	trigger:
+		set {_menu} to a select menu with id "roles" with placeholder "Pick a team"
+		add option "Red team" with value "{@red}" to {_menu}
+		add option "Blue team" with value "{@blue}" to {_menu}
+		reply ephemerally with "Choose:" with components {_menu}
+
+on select menu "roles":
+	take the role role with id "{@red}" from the member
+	take the role role with id "{@blue}" from the member
+	give the role role with id selected value to the member
+	if last discord error is set:
+		edit the message to "Couldn't: %last discord error%" with no components
+	else:
+		edit the message to "Done." with no components

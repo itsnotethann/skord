@@ -32,6 +32,7 @@ import io.github.itsnotethann.skord.discord.FetchProperty;
 import io.github.itsnotethann.skord.discord.GuildRef;
 import io.github.itsnotethann.skord.discord.MessageRef;
 import io.github.itsnotethann.skord.discord.RefCodec;
+import io.github.itsnotethann.skord.discord.MemberRef;
 import io.github.itsnotethann.skord.discord.RoleRef;
 import io.github.itsnotethann.skord.discord.UserRef;
 import io.github.itsnotethann.skord.protocol.CommandSpec;
@@ -343,6 +344,44 @@ public final class RemoteDiscord implements Discord, DiscordActions, DiscordEven
 		args.add("guild", RefCodec.toJson(guild));
 		args.addProperty("name", name);
 		return action("create-channel", args).thenApply(result -> new ChannelRef(id(result), name));
+	}
+
+	@Override
+	public CompletionStage<Void> addRole(MemberRef member, RoleRef role) {
+		return memberAction("add-role", member, role, null, 0);
+	}
+
+	@Override
+	public CompletionStage<Void> removeRole(MemberRef member, RoleRef role) {
+		return memberAction("remove-role", member, role, null, 0);
+	}
+
+	@Override
+	public CompletionStage<Void> kick(MemberRef member, @Nullable String reason) {
+		return memberAction("kick", member, null, reason, 0);
+	}
+
+	@Override
+	public CompletionStage<Void> ban(MemberRef member, @Nullable String reason) {
+		return memberAction("ban", member, null, reason, 0);
+	}
+
+	@Override
+	public CompletionStage<Void> timeout(MemberRef member, long seconds, @Nullable String reason) {
+		return memberAction("timeout", member, null, reason, seconds);
+	}
+
+	private CompletionStage<Void> memberAction(String kind, MemberRef member, @Nullable RoleRef role, @Nullable String reason,
+			long seconds) {
+		JsonObject args = new JsonObject();
+		args.add("member", RefCodec.toJson(member));
+		if (role != null)
+			args.add("role", RefCodec.toJson(role));
+		if (reason != null)
+			args.addProperty("reason", reason);
+		if (kind.equals("timeout"))
+			args.addProperty("seconds", seconds);
+		return action(kind, args).thenApply(result -> null);
 	}
 
 	@Override

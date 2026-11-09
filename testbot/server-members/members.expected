@@ -1,0 +1,8 @@
+join 444444444444444444
+role ok
+kick failed: out of scope, missing scope members
+scope now: roles,members; listen: members,boosts
+join 444444444444444444
+role ok
+kick ok
+boost boost:111111111111111111:444444444444444444:1700000000

@@ -12,6 +12,8 @@ public record EventSpec(Kind kind, Map<String, String> filters, boolean held) {
 		SELECT_MENU,
 		MODAL_SUBMIT,
 		BOOST_START,
+		MEMBER_JOIN,
+		MEMBER_LEAVE,
 		TEST_BOOST;
 
 		public String wire() {
@@ -30,6 +32,7 @@ public record EventSpec(Kind kind, Map<String, String> filters, boolean held) {
 			return switch (this) {
 				case MESSAGE -> io.github.itsnotethann.skord.protocol.Listen.MESSAGES;
 				case BOOST_START -> io.github.itsnotethann.skord.protocol.Listen.BOOSTS;
+				case MEMBER_JOIN, MEMBER_LEAVE -> io.github.itsnotethann.skord.protocol.Listen.MEMBERS;
 				default -> null;
 			};
 		}

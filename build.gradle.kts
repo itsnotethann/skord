@@ -1,7 +1,7 @@
 val jitpack = System.getenv("JITPACK") == "true"
 
 group = if (jitpack) "${System.getenv("GROUP")}.${System.getenv("ARTIFACT")}" else "io.github.itsnotethann.skord"
-version = if (jitpack) System.getenv("VERSION") else "0.1.0-SNAPSHOT"
+version = if (jitpack) System.getenv("VERSION") else (findProperty("releaseVersion") ?: "0.1.0-SNAPSHOT")
 
 val published = setOf("protocol", "discord-api", "bridge-api")
 

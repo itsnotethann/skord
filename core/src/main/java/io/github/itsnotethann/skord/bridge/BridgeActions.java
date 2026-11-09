@@ -19,7 +19,9 @@ import io.github.itsnotethann.skord.discord.GuildRef;
 import io.github.itsnotethann.skord.discord.Components;
 import io.github.itsnotethann.skord.discord.Embeds;
 import io.github.itsnotethann.skord.discord.MessageBody;
+import io.github.itsnotethann.skord.discord.MemberRef;
 import io.github.itsnotethann.skord.discord.MessageRef;
+import io.github.itsnotethann.skord.discord.RoleRef;
 import io.github.itsnotethann.skord.discord.RefCodec;
 import io.github.itsnotethann.skord.protocol.Frame;
 import io.github.itsnotethann.skord.protocol.Scope;
@@ -41,6 +43,8 @@ final class BridgeActions {
 			case "delete" -> Scope.DELETE;
 			case "fetch-message" -> Scope.READ;
 			case "create-channel" -> Scope.CHANNELS;
+			case "add-role", "remove-role" -> Scope.ROLES;
+			case "kick", "ban", "timeout" -> Scope.MEMBERS;
 			case "fetch", "gateway-ping" -> Scope.READ;
 			default -> null;
 		};
@@ -146,6 +150,29 @@ final class BridgeActions {
 						yield CompletableFuture.completedFuture(invalid(id, "fetch needs a ref and a property"));
 					yield actions.fetch(target, parsed).thenApply(value ->
 						new Frame.Result(id, true, null, null, RefCodec.valueToJson(value)));
+				}
+				case "add-role", "remove-role" -> {
+					MemberRef member = ref(args, "member", MemberRef.class);
+					RoleRef role = ref(args, "role", RoleRef.class);
+					if (member == null || role == null)
+						yield CompletableFuture.completedFuture(invalid(id, frame.kind() + " needs a member and a role"));
+					CompletionStage<Void> changed = frame.kind().equals("add-role")
+						? actions.addRole(member, role) : actions.removeRole(member, role);
+					yield changed.thenApply(done -> new Frame.Result(id, true, Long.toString(member.id()), null));
+				}
+				case "kick", "ban", "timeout" -> {
+					MemberRef member = ref(args, "member", MemberRef.class);
+					if (member == null)
+						yield CompletableFuture.completedFuture(invalid(id, frame.kind() + " needs a member"));
+					String reason = text(args, "reason");
+					JsonElement seconds = args.get("seconds");
+					CompletionStage<Void> done = switch (frame.kind()) {
+						case "kick" -> actions.kick(member, reason);
+						case "ban" -> actions.ban(member, reason);
+						default -> actions.timeout(member,
+							seconds != null && seconds.isJsonPrimitive() ? seconds.getAsLong() : 0, reason);
+					};
+					yield done.thenApply(ignored -> new Frame.Result(id, true, Long.toString(member.id()), null));
 				}
 				case "gateway-ping" -> actions.gatewayPing().thenApply(ping ->
 					new Frame.Result(id, true, null, null, new com.google.gson.JsonPrimitive(ping)));

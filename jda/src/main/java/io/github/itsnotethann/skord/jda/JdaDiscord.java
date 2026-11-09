@@ -1,7 +1,9 @@
 package io.github.itsnotethann.skord.jda;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
@@ -33,6 +35,7 @@ import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.UserSnowflake;
 import net.dv8tion.jda.api.entities.channel.concrete.Category;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import net.dv8tion.jda.api.interactions.InteractionHook;
@@ -214,6 +217,57 @@ public final class JdaDiscord implements Discord, DiscordActions, DiscordEvents 
 		if (found == null)
 			return failed(DiscordError.Type.MISSING_ACCESS, "Missing Access", 50001);
 		return found.createTextChannel(name).submit().thenApply(JdaRefs::channel);
+	}
+
+	@Override
+	public CompletionStage<Void> addRole(MemberRef member, RoleRef role) {
+		return withRole(member, role, (guild, found) -> guild.addRoleToMember(UserSnowflake.fromId(member.id()), found).submit());
+	}
+
+	@Override
+	public CompletionStage<Void> removeRole(MemberRef member, RoleRef role) {
+		return withRole(member, role,
+			(guild, found) -> guild.removeRoleFromMember(UserSnowflake.fromId(member.id()), found).submit());
+	}
+
+	@Override
+	public CompletionStage<Void> kick(MemberRef member, @Nullable String reason) {
+		return withGuild(member, guild -> guild.kick(UserSnowflake.fromId(member.id())).reason(reason).submit());
+	}
+
+	@Override
+	public CompletionStage<Void> ban(MemberRef member, @Nullable String reason) {
+		return withGuild(member, guild -> guild.ban(UserSnowflake.fromId(member.id()), 0, TimeUnit.SECONDS).reason(reason)
+			.submit());
+	}
+
+	@Override
+	public CompletionStage<Void> timeout(MemberRef member, long seconds, @Nullable String reason) {
+		UserSnowflake user = UserSnowflake.fromId(member.id());
+		return withGuild(member, guild -> seconds <= 0
+			? guild.removeTimeout(user).reason(reason).submit()
+			: guild.timeoutFor(user, Duration.ofSeconds(seconds)).reason(reason).submit());
+	}
+
+	private CompletionStage<Void> withGuild(MemberRef member, Function<Guild, CompletionStage<Void>> action) {
+		Guild guild = jda().getGuildById(member.guild());
+		if (guild == null)
+			return failed(DiscordError.Type.MISSING_ACCESS, "Missing Access", 50001);
+		try {
+			return action.apply(guild);
+		} catch (RuntimeException e) {
+			return CompletableFuture.failedFuture(e);
+		}
+	}
+
+	private CompletionStage<Void> withRole(MemberRef member, RoleRef role,
+			java.util.function.BiFunction<Guild, Role, CompletionStage<Void>> action) {
+		return withGuild(member, guild -> {
+			Role found = guild.getRoleById(role.id());
+			if (found == null)
+				return failed(DiscordError.Type.UNKNOWN_ROLE, "Unknown Role", 10011);
+			return action.apply(guild, found);
+		});
 	}
 
 	@Override

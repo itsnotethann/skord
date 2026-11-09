@@ -1,0 +1,19 @@
+# Greets new members, gives them a role, and thanks boosters.
+# Needs the guild-members intent in skord.yml and Server Members Intent in the developer portal.
+# Put your own ids in the options.
+
+options:
+	welcome-channel: 234567890123456789
+	member-role: 123456789012345678
+
+on member join:
+	give the role role with id "{@member-role}" to the member
+	if error type of last discord error is hierarchy:
+		send "I can't give that role: move my role above it." to channel with id "{@welcome-channel}"
+	send "Welcome %mention of user%!" to channel with id "{@welcome-channel}"
+
+on member leave:
+	send "%name of user% left." to channel with id "{@welcome-channel}"
+
+on boost:
+	send "Thanks for boosting, %mention of user%!" to channel with id "{@welcome-channel}"

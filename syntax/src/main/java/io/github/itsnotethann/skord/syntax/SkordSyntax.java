@@ -59,6 +59,7 @@ public final class SkordSyntax {
 		SlashSyntax.register();
 		ComponentSyntax.register();
 		ModalSyntax.register();
+		GuildSyntax.register();
 		io.github.itsnotethann.skord.shared.SharedSyntax.register();
 
 		Skript.registerExpression(ExprSelf.class, UserRef.class, ExpressionType.SIMPLE, "[the] bot [user]");

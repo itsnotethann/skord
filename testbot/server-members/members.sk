@@ -1,0 +1,15 @@
+on member join:
+	mark "join %discord id of user%"
+	give the role role with id "555555555555555555" to the member
+	if last discord error is set:
+		mark "role failed: %error type of last discord error%"
+	else:
+		mark "role ok"
+	kick member the member because "test"
+	if last discord error is set:
+		mark "kick failed: %error type of last discord error%, missing scope %missing scope of last discord error%"
+	else:
+		mark "kick ok"
+
+on boost:
+	mark "boost %event id%"

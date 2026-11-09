@@ -127,6 +127,22 @@ public final class RemoteServer {
 
 	static {
 		FACTORIES.put(EventSpec.Kind.MESSAGE, RemoteServer::message);
+		FACTORIES.put(EventSpec.Kind.MEMBER_JOIN, event -> event.data().get("member") instanceof MemberRef member
+			? new io.github.itsnotethann.skord.event.MemberEvent.Join(member) : null);
+		FACTORIES.put(EventSpec.Kind.MEMBER_LEAVE, event -> event.data().get("member") instanceof MemberRef member
+			? new io.github.itsnotethann.skord.event.MemberEvent.Leave(member) : null);
+		FACTORIES.put(EventSpec.Kind.BOOST_START, RemoteServer::boost);
+	}
+
+	private static @Nullable PlatformEvent boost(DiscordEvent event) {
+		long guild = parse(String.valueOf(event.data().get("guildId")));
+		long user = parse(String.valueOf(event.data().get("userId")));
+		long start = event.data().get("startEpoch") instanceof Number number ? number.longValue()
+			: parse(String.valueOf(event.data().get("startEpoch")));
+		if (guild == 0 || user == 0)
+			return null;
+		return new io.github.itsnotethann.skord.event.BoostEvent(new MemberRef(user, guild), start,
+			io.github.itsnotethann.skord.event.BoostEvent.id(guild, user, start), event.redelivered());
 	}
 
 	public static void factory(EventSpec.Kind kind, Function<DiscordEvent, PlatformEvent> factory) {

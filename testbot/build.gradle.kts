@@ -140,9 +140,23 @@ val componentScripts by tasks.registering(JavaExec::class) {
 	outputs.upToDateWhen { false }
 }
 
+val memberScripts by tasks.registering(JavaExec::class) {
+	group = "verification"
+	dependsOn(tasks.classes)
+	classpath = sourceSets.main.get().runtimeClasspath
+	mainClass.set("io.github.itsnotethann.skord.testbot.TestBot")
+	systemProperty("skord.ack-watchdog-ms", "300")
+	args(layout.projectDirectory.dir("bridge-members").asFile.absolutePath,
+		layout.buildDirectory.dir("membertest").get().asFile.absolutePath,
+		layout.projectDirectory.dir("server-members").asFile.absolutePath)
+	inputs.dir(layout.projectDirectory.dir("bridge-members"))
+	inputs.dir(layout.projectDirectory.dir("server-members"))
+	outputs.upToDateWhen { false }
+}
+
 // One command runs all of it: the scripts, then the bridge, then the scripts that use it.
 botTest {
-	dependsOn(bridgeTest, bridgeScripts, remoteScripts, heldScripts, sharedScripts, functionScripts, componentScripts)
+	dependsOn(bridgeTest, bridgeScripts, remoteScripts, heldScripts, sharedScripts, functionScripts, componentScripts, memberScripts)
 }
 
 tasks.check {

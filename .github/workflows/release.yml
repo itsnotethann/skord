@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build
+        run: >
+          ./gradlew check :core:shadowJar :bridge-minestom:shadowJar :bridge-paper:shadowJar
+          -PreleaseVersion=${GITHUB_REF_NAME#v} --console=plain
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" --title "skord $GITHUB_REF_NAME" --generate-notes
+          core/build/libs/skord.jar
+          bridge-minestom/build/libs/bridge-minestom-${GITHUB_REF_NAME#v}.jar
+          bridge-paper/build/libs/bridge-paper-${GITHUB_REF_NAME#v}.jar

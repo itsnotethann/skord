@@ -56,7 +56,7 @@ on ready:
 	connect fake server "raw"
 	wait 150 milliseconds
 	set {_out::*} to output of sk link "scope raw --listen messages"
-	fake server "raw" subscribes to "message:channel=111111111111111111" and "member-join"
+	fake server "raw" subscribes to "message:channel=111111111111111111" and "presence-update"
 	wait 300 milliseconds
 	loop subscription refusals of fake server "raw":
 		mark "raw refused: %loop-value%"

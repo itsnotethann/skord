@@ -53,6 +53,26 @@ public interface DiscordActions {
 		return CompletableFuture.failedFuture(new UnsupportedOperationException("this Discord cannot fetch messages"));
 	}
 
+	default CompletionStage<Void> addRole(MemberRef member, RoleRef role) {
+		return CompletableFuture.failedFuture(new UnsupportedOperationException("this Discord cannot change roles"));
+	}
+
+	default CompletionStage<Void> removeRole(MemberRef member, RoleRef role) {
+		return CompletableFuture.failedFuture(new UnsupportedOperationException("this Discord cannot change roles"));
+	}
+
+	default CompletionStage<Void> kick(MemberRef member, @org.jetbrains.annotations.Nullable String reason) {
+		return CompletableFuture.failedFuture(new UnsupportedOperationException("this Discord cannot kick members"));
+	}
+
+	default CompletionStage<Void> ban(MemberRef member, @org.jetbrains.annotations.Nullable String reason) {
+		return CompletableFuture.failedFuture(new UnsupportedOperationException("this Discord cannot ban members"));
+	}
+
+	default CompletionStage<Void> timeout(MemberRef member, long seconds, @org.jetbrains.annotations.Nullable String reason) {
+		return CompletableFuture.failedFuture(new UnsupportedOperationException("this Discord cannot time members out"));
+	}
+
 	CompletionStage<ChannelRef> createTextChannel(CategoryRef category, String name);
 
 	CompletionStage<ChannelRef> createTextChannel(GuildRef guild, String name);

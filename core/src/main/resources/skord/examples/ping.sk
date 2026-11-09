@@ -4,9 +4,9 @@ on ready:
 	log "skord is online as %name of the bot%"
 
 on message received:
-	event-discord user is not a bot
 	if content of event-message is "!ping":
-		reply with "Pong! %gateway ping% ms"
+		fetch the gateway ping and store it in {_ping}
+		reply with "Pong! %{_ping}% ms"
 	else if content of event-message is "!whoami":
 		reply with "You are %mention of event-discord user% (id %discord id of event-discord user%) in %event-channel%"
 	else if content of event-message is "!count":

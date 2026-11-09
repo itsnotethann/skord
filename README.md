@@ -8,11 +8,13 @@ network (see [Game servers](#game-servers)).
 ```
 on message received:
 	if content of event-message is "!ping":
-		reply with "Pong! %gateway ping% ms"
+		fetch the gateway ping and store it in {_ping}
+		reply with "Pong! %{_ping}% ms"
 ```
 
-Early days: `0.1.0`, not released yet. Slash commands, buttons, select menus, modals, embeds and
-linked game servers work. Role and member management come next.
+Version `0.1.0`. Slash commands, buttons, select menus, modals, embeds, roles, member events,
+moderation and linked game servers work. Download the jars from
+[Releases](https://github.com/itsnotethann/skord/releases).
 
 ```
 slash command ticket:
@@ -204,6 +206,36 @@ slash command rules:
 - `edit ... with no embeds` removes them. `embeds of {_msg}` reads a message's embeds.
 - A message whose embeds break one of Discord's limits is not sent, and the error names the limit.
 
+## Members and roles
+
+```
+on member join:
+	set {_role} to role with id "123456789012345678"
+	give the role {_role} to the member
+	send "Welcome %mention of user%!" to channel with id "234567890123456789"
+
+on member leave:
+	send "%name of user% left." to channel with id "234567890123456789"
+
+on boost:
+	send "Thanks for boosting, %mention of user%!" to channel with id "234567890123456789"
+```
+
+- `on member join`, `on member leave` and `on boost` take `in guild "<id>"` to narrow them. Each has
+  `user`, `member` and `guild`. A boost also has `event id` (`boost:<guild>:<user>:<start>`, the same
+  every time that boost is seen) and `event-date`, when it started.
+- They need the `guild-members` intent in `skord.yml`, and **Server Members Intent** turned on under
+  **Bot > Privileged Gateway Intents**. Without it skord warns at startup and the events never come.
+- `give the role {_role} to {_member}` and `take the role {_role} from {_member}` change roles. A role
+  above the bot's own fails with `error type` `hierarchy`.
+- `kick member {_m}`, `ban member {_m}`, `time out member {_m} for 10 minutes` and
+  `remove the timeout from member {_m}`, each with an optional `because "reason"`. A timeout is at most
+  28 days.
+- `role with id "..."`, `guild with id "..."` and `the member of {_user} in {_guild}` make references
+  from ids. `fetch the roles of {_member} and store it in {_roles::*}` reads a member's roles.
+- `creation date of {_user}` is when an account (or a guild, channel, role or message) was made, read
+  from its id with no request.
+
 ## Game servers
 
 skord can be the Discord side of a Minecraft network. The bot keeps the token, and each game
@@ -263,13 +295,14 @@ and a change applies at once, to a connected server too.
 | `channels` | create channels |
 | `read` | fetch messages and other Discord objects, read the gateway ping |
 | `call` | call shared functions on the bot and on other servers |
-| `roles`, `members` | reserved; nothing uses them yet |
+| `roles` | give and take roles |
+| `members` | kick, ban and time out members |
 
 A request outside the scope fails with `error type` `out of scope`, and `missing scope of` names
 it. Answering an interaction for the server's own command needs no scope.
 
-`--listen` sets which Discord events the bot forwards: `messages`, `boosts`. The words `members`,
-`invites` and `components` are accepted but no event uses them yet. Button, menu and modal
+`--listen` sets which Discord events the bot forwards: `messages`, `members` (join and leave) and
+`boosts`. The words `invites` and `components` are accepted but no event uses them yet. Button, menu and modal
 interactions need no listen word: they go to whichever process sent the message.
 
 ### Commands and events on a server
@@ -285,7 +318,8 @@ interactions need no listen word: they go to whichever process sent the message.
 - Discord values on a server are references: an id and a name. Anything more is a fetch through the
   bot, and pauses like any other request.
 
-**Held events.** A Java consumer can subscribe to a boost with `held`. While the server is offline,
+**Held events.** A script can write `on boost (held):`, and a Java consumer can subscribe to a boost with
+`held`. While the server is offline,
 the bot queues the event in `.skord/held/<server>.jsonl`, and delivers the queue in order when the
 server reconnects. Delivery is at least once: a server that dies before acknowledging sees the event
 again, with `event is redelivered` true. Pay out on `event id` in your own storage, so a second run
@@ -375,7 +409,8 @@ joining and leaving, and listens for the connection going up or down. `BridgeCon
 metadata to the hello. On Paper, get the running
 `Bridge` from the `ServicesManager`.
 
-See `core/src/main/resources/skord/examples/` for complete scripts.
+See [`core/src/main/resources/skord/examples/`](core/src/main/resources/skord/examples) for complete
+scripts: a ping bot, a ticket command, a welcome and boost message, and a role picker.
 
 ## Running a bot
 
@@ -383,12 +418,14 @@ You need Java 25.
 
 1. Create an application at <https://discord.com/developers/applications>. Under **Bot**,
    click **Reset Token** and copy the token. Under **Privileged Gateway Intents**, turn on
-   **Message Content Intent**.
+   **Message Content Intent**, and **Server Members Intent** if you use member events or boosts.
 2. Invite the bot to your server: **OAuth2 → URL Generator**, tick `bot` and
    `applications.commands` (slash commands need it), then the permissions it needs (at least
    View Channels, Send Messages, Read Message History; the ticket example also needs Manage
-   Channels).
-3. Put `skord.jar` in an empty folder and start it, by double-clicking it or with:
+   Channels, roles need Manage Roles, and kick, ban and timeout need Kick Members, Ban Members and
+   Moderate Members).
+3. Download `skord.jar` from [Releases](https://github.com/itsnotethann/skord/releases). Put it in an
+   empty folder and start it, by double-clicking it or with:
    ```
    java -jar skord.jar
    ```
@@ -405,7 +442,7 @@ instead; it overrides the file.
 | Key | Default | What it does |
 |---|---|---|
 | `token` | | the bot token; `SKORD_TOKEN` overrides it |
-| `intents` | | which events Discord sends; the first start writes `guild-messages`, `direct-messages` and `message-content`; boosts also need `guild-members` |
+| `intents` | | which events Discord sends; the first start writes `guild-messages`, `direct-messages` and `message-content`; member events and boosts also need `guild-members` |
 | `commands.dev-guild` | | a guild id; commands register there and update instantly |
 | `bridge.port` | off | the port game servers connect to |
 | `bridge.bind` | `0.0.0.0` | the address to listen on |
@@ -440,11 +477,15 @@ non-zero on any error. It's useful before deploying, or in CI.
 ## Building
 
 ```
+git clone --recursive https://github.com/itsnotethann/skord
+cd skord
 ./gradlew :core:shadowJar
 ```
 
-The jar lands in `core/build/libs/skord.jar`. With an `uncommon` checkout next to this one, the
-engine is built from source; otherwise it comes from JitPack.
+You need Java 25. The jar lands in `core/build/libs/skord.jar`. The Skript engine,
+[uncommon-skript](https://github.com/itsnotethann/uncommon-skript), is a submodule built from source;
+in a clone made without `--recursive`, run `git submodule update --init` first. An `uncommon`
+checkout next to this one takes its place.
 
 ```
 ./gradlew :testbot:botTest

@@ -1,0 +1,37 @@
+on member join in guild "111111111111111111":
+	mark "join %discord id of user% in %discord id of guild%"
+	set {_role} to role with id "555555555555555555"
+	give the role {_role} to the member
+	if last discord error is not set:
+		mark "role given"
+	give the role role with id "666666666666666666" to the member
+	mark "hierarchy: %error type of last discord error%"
+	take the role {_role} from the member
+	if creation date of user is less than now:
+		mark "account is older than now"
+	fire member leave of user "444444444444444444" in guild "111111111111111111"
+
+on member leave:
+	mark "left %discord id of user%"
+	fire boost of user "444444444444444444" in guild "111111111111111111" at 1700000000
+
+on boost:
+	mark "boost %event id%"
+	if event-date is less than now:
+		mark "boost started in the past"
+	fire test event "moderate"
+
+on test "moderate":
+	set {_m} to the member of user with id "444444444444444444" in guild with id "111111111111111111"
+	kick member {_m} because "spam"
+	ban member {_m}
+	time out member {_m} for 10 minutes due to "cool off"
+	remove the timeout from member {_m}
+	kick member the member of user with id "444444444444444444" in guild with id "999999999999999998"
+	mark "unknown guild: %error type of last discord error%"
+	loop the fake moderation:
+		mark loop-value
+
+on ready:
+	fire member join of user "444444444444444444" in guild "111111111111111111"
+	fire member join of user "444444444444444444" in guild "222222222222222222"

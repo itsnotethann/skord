@@ -106,19 +106,22 @@ public final class JdaEventBus implements net.dv8tion.jda.api.hooks.EventListene
 		} catch (java.time.format.DateTimeParseException e) {
 			return;
 		}
-		announceBoost(member.getString("guild_id"), member.getObject("user").getString("id"), start);
+		announceBoost(member.getString("guild_id"), member.getObject("user").getString("id"), start, true);
 	}
 
-	private void announceBoost(String guildId, String userId, long start) {
+	private void announceBoost(String guildId, String userId, long start, boolean live) {
 		if (boostsSeen.size() > 10_000)
 			boostsSeen.clear();
 		if (!boostsSeen.add(guildId + ":" + userId + ":" + start))
 			return;
-		Map<String, Object> data = new HashMap<>();
-		data.put("guildId", guildId);
-		data.put("userId", userId);
-		data.put("startEpoch", start);
-		publishRaw(new DiscordEvent(EventSpec.Kind.BOOST_START, data));
+		long guild = Long.parseLong(guildId), user = Long.parseLong(userId);
+		io.github.itsnotethann.skord.event.BoostEvent boost = new io.github.itsnotethann.skord.event.BoostEvent(
+			new io.github.itsnotethann.skord.discord.MemberRef(user, guild), start,
+			io.github.itsnotethann.skord.event.BoostEvent.id(guild, user, start), false);
+		if (live)
+			fire(boost);
+		else
+			publishRaw(boostEvent(boost));
 	}
 
 	public void sweepBoosters(net.dv8tion.jda.api.JDA jda) {
@@ -126,7 +129,7 @@ public final class JdaEventBus implements net.dv8tion.jda.api.hooks.EventListene
 			try {
 				guild.loadMembers(found -> {
 					if (found.getTimeBoosted() != null)
-						announceBoost(guild.getId(), found.getUser().getId(), found.getTimeBoosted().toEpochSecond());
+						announceBoost(guild.getId(), found.getUser().getId(), found.getTimeBoosted().toEpochSecond(), false);
 				});
 			} catch (RuntimeException e) {
 				org.slf4j.LoggerFactory.getLogger(JdaEventBus.class)
@@ -146,6 +149,12 @@ public final class JdaEventBus implements net.dv8tion.jda.api.hooks.EventListene
 			return JdaRefs.select(select);
 		if (event instanceof net.dv8tion.jda.api.events.interaction.ModalInteractionEvent submit)
 			return JdaRefs.modal(submit);
+		if (event instanceof net.dv8tion.jda.api.events.guild.member.GuildMemberJoinEvent join)
+			return new io.github.itsnotethann.skord.event.MemberEvent.Join(new io.github.itsnotethann.skord.discord.MemberRef(
+				join.getUser().getIdLong(), join.getGuild().getIdLong(), join.getUser().getName()));
+		if (event instanceof net.dv8tion.jda.api.events.guild.member.GuildMemberRemoveEvent left)
+			return new io.github.itsnotethann.skord.event.MemberEvent.Leave(new io.github.itsnotethann.skord.discord.MemberRef(
+				left.getUser().getIdLong(), left.getGuild().getIdLong(), left.getUser().getName()));
 		return null;
 	}
 
@@ -217,13 +226,30 @@ public final class JdaEventBus implements net.dv8tion.jda.api.hooks.EventListene
 					data.put("guild", slash.guild());
 				yield new DiscordEvent(EventSpec.Kind.SLASH_COMMAND, data);
 			}
+			case io.github.itsnotethann.skord.event.MemberEvent member -> {
+				Map<String, Object> data = new HashMap<>();
+				data.put("member", member.member());
+				data.put("user", member.user());
+				data.put("guild", member.guild());
+				yield new DiscordEvent(member instanceof io.github.itsnotethann.skord.event.MemberEvent.Join
+					? EventSpec.Kind.MEMBER_JOIN : EventSpec.Kind.MEMBER_LEAVE, data);
+			}
+			case io.github.itsnotethann.skord.event.BoostEvent boost -> boostEvent(boost);
 			default -> null;
 		};
 		if (published != null)
 			deliver(published);
 	}
 
-		public void publishRaw(DiscordEvent published) {
+		private static DiscordEvent boostEvent(io.github.itsnotethann.skord.event.BoostEvent boost) {
+		Map<String, Object> data = new HashMap<>();
+		data.put("guildId", Long.toString(boost.guild().id()));
+		data.put("userId", Long.toString(boost.user().id()));
+		data.put("startEpoch", boost.startEpoch());
+		return new DiscordEvent(EventSpec.Kind.BOOST_START, data);
+	}
+
+	public void publishRaw(DiscordEvent published) {
 		if (host.onScriptThread())
 			deliver(published);
 		else

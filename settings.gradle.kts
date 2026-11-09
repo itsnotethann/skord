@@ -13,4 +13,6 @@ if (System.getenv("JITPACK") == "true") {
 		includeBuild("../uncommon")
 	else if (file("uncommon/settings.gradle.kts").exists())
 		includeBuild("uncommon")
+	else
+		throw GradleException("skord builds its Skript engine from the uncommon submodule. Run: git submodule update --init")
 }

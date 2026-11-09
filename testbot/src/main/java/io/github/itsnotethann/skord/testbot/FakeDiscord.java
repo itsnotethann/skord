@@ -330,6 +330,48 @@ final class FakeDiscord implements Discord, DiscordActions, DiscordEvents {
 		return CompletableFuture.completedFuture(new ChannelRef(NEXT_ID.incrementAndGet(), name));
 	}
 
+	static final List<String> MODERATION = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+	@Override
+	public CompletionStage<Void> addRole(MemberRef member, RoleRef role) {
+		return moderate("add-role", member, role, "give " + role.id() + " to " + member.id());
+	}
+
+	@Override
+	public CompletionStage<Void> removeRole(MemberRef member, RoleRef role) {
+		return moderate("remove-role", member, role, "take " + role.id() + " from " + member.id());
+	}
+
+	@Override
+	public CompletionStage<Void> kick(MemberRef member, @Nullable String reason) {
+		return moderate("kick", member, null, "kick " + member.id() + (reason == null ? "" : " because " + reason));
+	}
+
+	@Override
+	public CompletionStage<Void> ban(MemberRef member, @Nullable String reason) {
+		return moderate("ban", member, null, "ban " + member.id() + (reason == null ? "" : " because " + reason));
+	}
+
+	@Override
+	public CompletionStage<Void> timeout(MemberRef member, long seconds, @Nullable String reason) {
+		return moderate("timeout", member, null, (seconds == 0 ? "untimeout " + member.id() : "timeout " + member.id()
+			+ " for " + seconds + "s") + (reason == null ? "" : " because " + reason));
+	}
+
+	private CompletionStage<Void> moderate(String kind, MemberRef member, @Nullable RoleRef role, String line) {
+		called(kind);
+		if (!KNOWN.contains(member.guild()))
+			return gone(DiscordError.Type.MISSING_ACCESS, "Missing Access", 50001);
+		if (!KNOWN.contains(member.id()))
+			return gone(DiscordError.Type.UNKNOWN_MEMBER, "Unknown Member", 10007);
+		if (role != null && role.id() == 666666666666666666L)
+			return gone(DiscordError.Type.HIERARCHY, "Can't modify a role with higher or equal highest role than yourself!", 0);
+		if (role != null && !KNOWN.contains(role.id()))
+			return gone(DiscordError.Type.UNKNOWN_ROLE, "Unknown Role", 10011);
+		MODERATION.add(line);
+		return CompletableFuture.completedFuture(null);
+	}
+
 	@Override
 	public CompletionStage<Long> gatewayPing() {
 		called("ping");

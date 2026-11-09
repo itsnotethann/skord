@@ -7,5 +7,5 @@ narrowed: Link 'remote' may now: reply.
 discord calls: send 1, reply 2, create 1
 nothing forwarded once the listen word is gone
 refused: 1
-raw refused: member-join: the bot has no event called 'member-join'
+raw refused: presence-update: the bot has no event called 'presence-update'
 raw forwarded: 1
