@@ -54,8 +54,11 @@ public final class SkordSyntax {
 		Skript.registerCondition(CondRedelivered.class, "[the] event (is|was) redelivered",
 			"[the] event (isn't|is not|wasn't|was not) redelivered");
 
+		EmbedSyntax.register();
 		RestSyntax.register();
 		SlashSyntax.register();
+		ComponentSyntax.register();
+		ModalSyntax.register();
 		io.github.itsnotethann.skord.shared.SharedSyntax.register();
 
 		Skript.registerExpression(ExprSelf.class, UserRef.class, ExpressionType.SIMPLE, "[the] bot [user]");
@@ -67,6 +70,7 @@ public final class SkordSyntax {
 		Skript.registerExpression(ExprGuild.class, GuildRef.class, ExpressionType.EVENT, "[the] guild");
 		Skript.registerExpression(ExprChannel.class, ChannelRef.class, ExpressionType.EVENT, "[the] channel");
 		Skript.registerExpression(ExprChannelById.class, ChannelRef.class, ExpressionType.COMBINED, "channel with id %string%");
+		Skript.registerExpression(ExprUserById.class, UserRef.class, ExpressionType.COMBINED, "[discord] user with id %string%");
 		Skript.registerExpression(ExprCategoryById.class, CategoryRef.class, ExpressionType.COMBINED, "category with id %string%");
 		SimplePropertyExpression.register(ExprName.class, String.class, "[discord] name",
 			"discordusers/members/guilds/channels/categories/roles");
@@ -291,6 +295,21 @@ public final class SkordSyntax {
 		@Override
 		public Class<? extends ChannelRef> getReturnType() {
 			return ChannelRef.class;
+		}
+	}
+
+	/** A user by id. Any id makes a ref, cached or not; the name is filled in when the bot has it cached. */
+	public static final class ExprUserById extends ById<UserRef> {
+
+		@Override
+		protected @Nullable UserRef find(long id) {
+			UserRef bare = new UserRef(id, null);
+			return new UserRef(id, Discord.current().cachedName(bare));
+		}
+
+		@Override
+		public Class<? extends UserRef> getReturnType() {
+			return UserRef.class;
 		}
 	}
 

@@ -1,0 +1,7 @@
+send: [secondary pager:0:Previous (disabled), secondary pager:2:Next] [embed title "Fruit" description "Apple is fruit number 1." colour #57f287 footer "Page 1 of 3"] mentions off
+page 2
+update: [secondary pager:1:Previous, secondary pager:3:Next] [embed title "Fruit" description "Banana is fruit number 2." colour #57f287 footer "Page 2 of 3"]
+page 3
+update: [secondary pager:2:Previous, secondary pager:4:Next (disabled)] [embed title "Fruit" description "Cherry is fruit number 3." colour #57f287 footer "Page 3 of 3"]
+page 2
+update: [secondary pager:1:Previous, secondary pager:3:Next] [embed title "Fruit" description "Banana is fruit number 2." colour #57f287 footer "Page 2 of 3"]

@@ -12,6 +12,8 @@ import ch.njol.skript.lang.ExpressionType;
 import ch.njol.skript.lang.SkriptParser.ParseResult;
 import ch.njol.skript.lang.util.SimpleExpression;
 import ch.njol.util.Kleenean;
+import io.github.itsnotethann.skord.discord.MessageComponent;
+import io.github.itsnotethann.skord.event.ComponentEvent;
 import io.github.itsnotethann.skord.event.InteractionEvent;
 import io.github.itsnotethann.skord.event.MessageEvent;
 import io.github.itsnotethann.skord.event.SlashEvent;
@@ -23,6 +25,9 @@ import io.github.itsnotethann.skord.discord.DiscordRef;
 import io.github.itsnotethann.skord.discord.FetchProperty;
 import io.github.itsnotethann.skord.discord.GuildRef;
 import io.github.itsnotethann.skord.discord.MessageRef;
+import io.github.itsnotethann.skord.discord.MessageBody;
+import io.github.itsnotethann.skord.discord.Embed;
+import io.github.itsnotethann.skord.discord.UserRef;
 import io.github.itsnotethann.skord.protocol.DiscordPermission;
 import io.github.itsnotethann.skord.rest.RestEffect;
 import org.jetbrains.annotations.Nullable;
@@ -34,11 +39,29 @@ final class RestSyntax {
 	private RestSyntax() {}
 
 	static void register() {
-		Skript.registerEffect(EffSend.class, RestEffect.rest("send %string% to %channels%"));
+		String o = Outgoing.TAIL, w = Outgoing.SWAPPED, e = Outgoing.EMBEDS_ONLY, m = Outgoing.MENTIONS;
+		Skript.registerEffect(EffSend.class,
+			RestEffect.rest("send %string% " + o + " " + m + " to %channels%"),
+			RestEffect.rest("send %string% " + w + " " + m + " to %channels%"),
+			RestEffect.rest("send " + e + " " + m + " to %channels%"));
 		Skript.registerEffect(EffReply.class,
-			RestEffect.rest("reply to %discordmessage% with %string%"),
-			RestEffect.rest("reply [ephemeral:ephemerally] with %string%"));
-		Skript.registerEffect(EffEdit.class, RestEffect.rest("edit %discordmessage% to %string%"));
+			RestEffect.rest("reply to %discordmessage% with %string% " + o + " " + m),
+			RestEffect.rest("reply to %discordmessage% with %string% " + w + " " + m),
+			RestEffect.rest("reply to %discordmessage% with " + e + " " + m),
+			RestEffect.rest("reply [ephemeral:ephemerally] with %string% " + o + " " + m),
+			RestEffect.rest("reply [ephemeral:ephemerally] with %string% " + w + " " + m),
+			RestEffect.rest("reply [ephemeral:ephemerally] with " + e + " " + m));
+		Skript.registerEffect(EffEdit.class,
+			RestEffect.rest("edit %discordmessage% to %string%"),
+			RestEffect.rest("edit [the] message %discordmessage% to %string% " + o),
+			RestEffect.rest("edit [the] message %discordmessage% to %string% " + w),
+			RestEffect.rest("edit [the] message %discordmessage% to " + e));
+		Skript.registerEffect(EffDeleteMessage.class, RestEffect.rest("delete [the] message %discordmessage%"));
+		Skript.registerEffect(EffFetchMessage.class,
+			RestEffect.rest("(fetch|retrieve) [the] message with id %string% (in|from) %channel%"));
+		Skript.registerExpression(ExprMessagePart.class, Object.class, ExpressionType.PROPERTY,
+			"[the] (0:text|1:embeds|2:author|3:channel) of %discordmessage%",
+			"%discordmessage%'[s] (0:text|1:embeds|2:author|3:channel)");
 		Skript.registerEffect(EffDefer.class, RestEffect.rest("defer [the] reply [ephemeral:ephemerally]"));
 		Skript.registerEffect(EffCreateTextChannel.class,
 			RestEffect.rest("create [a] text channel (named|called) %string% in [category] %category%"),
@@ -56,27 +79,39 @@ final class RestSyntax {
 		SimplePropertyExpression.register(ExprErrorCode.class, Long.class, "error code", "discorderrors");
 	}
 
+	/** Which shape of the message part a pattern used: text then embeds, text with components first, or embeds alone. */
+	private static Outgoing.Form form(int shape) {
+		return switch (shape) {
+			case 0 -> Outgoing.Form.TEXT;
+			case 1 -> Outgoing.Form.SWAPPED;
+			default -> Outgoing.Form.EMBEDS;
+		};
+	}
+
 	public static final class EffSend extends RestEffect {
 
-		private Expression<String> text;
+		private Outgoing message;
 		private Expression<ChannelRef> channels;
 
 		@Override
 		@SuppressWarnings("unchecked")
 		protected boolean initRest(Expression<?>[] exprs, int matchedPattern, ParseResult parseResult) {
-			text = (Expression<String>) exprs[0];
-			channels = (Expression<ChannelRef>) exprs[1];
-			return true;
+			message = Outgoing.parse(exprs, 0, form(matchedPattern), parseResult);
+			channels = (Expression<ChannelRef>) exprs[message.next()];
+			return message.refuseRemoval("'send'");
 		}
 
 		@Override
 		protected @Nullable CompletionStage<?> request(PlatformEvent event) {
-			String value = text.getSingle(event);
-			if (value == null || value.isEmpty())
+			MessageBody body = message.body(event);
+			if (body == null)
 				return null;
+			String problem = body.problem();
+			if (problem != null)
+				return Outgoing.refused(problem);
 			List<CompletionStage<MessageRef>> sends = new ArrayList<>();
 			for (ChannelRef channel : channels.getArray(event))
-				sends.add(Discord.current().actions().send(channel, value));
+				sends.add(Discord.current().actions().send(channel, body));
 			return sends.isEmpty() ? null : RestEffect.all(sends);
 		}
 
@@ -87,7 +122,7 @@ final class RestSyntax {
 
 		@Override
 		public String toString(@Nullable PlatformEvent event, boolean debug) {
-			return "send " + text.toString(event, debug) + " to " + channels.toString(event, debug);
+			return "send " + message.toString(event, debug) + " to " + channels.toString(event, debug);
 		}
 	}
 
@@ -98,21 +133,23 @@ final class RestSyntax {
 	 */
 	public static final class EffReply extends RestEffect {
 
-		private @Nullable Expression<MessageRef> message;
-		private Expression<String> text;
+		private @Nullable Expression<MessageRef> target;
+		private Outgoing message;
 		private boolean ephemeral;
 
 		@Override
 		@SuppressWarnings("unchecked")
 		protected boolean initRest(Expression<?>[] exprs, int matchedPattern, ParseResult parseResult) {
-			if (matchedPattern == 0) {
-				message = (Expression<MessageRef>) exprs[0];
-				text = (Expression<String>) exprs[1];
-				return true;
+			if (matchedPattern < 3) {
+				target = (Expression<MessageRef>) exprs[0];
+				message = Outgoing.parse(exprs, 1, form(matchedPattern), parseResult);
+				return message.refuseRemoval("'reply'");
 			}
+			message = Outgoing.parse(exprs, 0, form(matchedPattern - 3), parseResult);
+			if (!message.refuseRemoval("'reply'"))
+				return false;
 			ephemeral = parseResult.hasTag("ephemeral");
-			text = (Expression<String>) exprs[0];
-			if (getParser().isCurrentEvent(SlashEvent.class))
+			if (getParser().isCurrentEvent(SlashEvent.class, ComponentEvent.class, io.github.itsnotethann.skord.event.ModalEvent.class))
 				return true;
 			if (ephemeral) {
 				Skript.error("Only an interaction, such as a slash command, can be answered ephemerally");
@@ -128,16 +165,19 @@ final class RestSyntax {
 
 		@Override
 		protected @Nullable CompletionStage<?> request(PlatformEvent event) {
-			String value = text.getSingle(event);
-			if (value == null || value.isEmpty())
+			MessageBody body = message.body(event);
+			if (body == null)
 				return null;
-			if (message != null) {
-				MessageRef target = message.getSingle(event);
-				return target == null ? null : Discord.current().actions().reply(target, value);
+			String problem = body.problem();
+			if (problem != null)
+				return Outgoing.refused(problem);
+			if (target != null) {
+				MessageRef to = target.getSingle(event);
+				return to == null ? null : Discord.current().actions().reply(to, body);
 			}
 			return switch (event) {
-				case InteractionEvent interaction -> interaction.interaction().reply(value, ephemeral, storesResult());
-				case MessageEvent received -> Discord.current().actions().reply(received.message(), value);
+				case InteractionEvent interaction -> interaction.interaction().reply(body, ephemeral, storesResult());
+				case MessageEvent received -> Discord.current().actions().reply(received.message(), body);
 				default -> null;
 			};
 		}
@@ -149,33 +189,46 @@ final class RestSyntax {
 
 		@Override
 		public String toString(@Nullable PlatformEvent event, boolean debug) {
-			return message == null
-				? "reply " + (ephemeral ? "ephemerally " : "") + "with " + text.toString(event, debug)
-				: "reply to " + message.toString(event, debug) + " with " + text.toString(event, debug);
+			return target == null
+				? "reply " + (ephemeral ? "ephemerally " : "") + "with " + message.toString(event, debug)
+				: "reply to " + target.toString(event, debug) + " with " + message.toString(event, debug);
 		}
 	}
 
-	/** Edits through the interaction hook when the message came from one: that's the only way for ephemeral ones. */
+	/**
+	 * Edits a message's text, and its embeds and components where the effect names them ({@code with no embeds}
+	 * removes them). Through the interaction hook when the message came from one: that's the only way for ephemeral
+	 * ones. A message a server put components on keeps sending its clicks to that server.
+	 */
 	public static final class EffEdit extends RestEffect {
 
-		private Expression<MessageRef> message;
-		private Expression<String> text;
+		private Expression<MessageRef> target;
+		private Outgoing message;
 
 		@Override
 		@SuppressWarnings("unchecked")
 		protected boolean initRest(Expression<?>[] exprs, int matchedPattern, ParseResult parseResult) {
-			message = (Expression<MessageRef>) exprs[0];
-			text = (Expression<String>) exprs[1];
+			target = (Expression<MessageRef>) exprs[0];
+			if (matchedPattern == 0) {
+				// The form from before embeds: text only, and so no embed or component expressions to read.
+				Expression<?>[] padded = {exprs[0], exprs[1], null, null};
+				message = Outgoing.parse(padded, 1, Outgoing.Form.TEXT, parseResult);
+			} else {
+				message = Outgoing.parse(exprs, 1, form(matchedPattern - 1), parseResult);
+			}
 			return true;
 		}
 
 		@Override
 		protected @Nullable CompletionStage<?> request(PlatformEvent event) {
-			MessageRef target = message.getSingle(event);
-			String value = text.getSingle(event);
-			if (target == null || value == null || value.isEmpty())
+			MessageRef to = target.getSingle(event);
+			MessageBody body = message.body(event);
+			if (to == null || body == null)
 				return null;
-			return Discord.current().actions().edit(target, value);
+			String problem = body.problem();
+			if (problem != null)
+				return Outgoing.refused(problem);
+			return Discord.current().actions().edit(to, body);
 		}
 
 		@Override
@@ -185,7 +238,131 @@ final class RestSyntax {
 
 		@Override
 		public String toString(@Nullable PlatformEvent event, boolean debug) {
-			return "edit " + message.toString(event, debug) + " to " + text.toString(event, debug);
+			return "edit message " + target.toString(event, debug) + " to " + message.toString(event, debug);
+		}
+	}
+
+	/** Deletes a message. An unknown message fails into {@code last discord error} with the type unknown message. */
+	public static final class EffDeleteMessage extends RestEffect {
+
+		private Expression<MessageRef> target;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		protected boolean initRest(Expression<?>[] exprs, int matchedPattern, ParseResult parseResult) {
+			target = (Expression<MessageRef>) exprs[0];
+			return true;
+		}
+
+		@Override
+		protected @Nullable CompletionStage<?> request(PlatformEvent event) {
+			MessageRef to = target.getSingle(event);
+			return to == null ? null : Discord.current().actions().delete(to);
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "delete message " + target.toString(event, debug);
+		}
+	}
+
+	/**
+	 * {@code fetch message with id "..." in <channel> and store it in {_msg}}: the message with its text, author and
+	 * embeds. Messages can't be stored in variables across restarts, so a script keeps the id and fetches again. An
+	 * unknown message leaves the variable unset and puts unknown message in {@code last discord error}.
+	 */
+	public static final class EffFetchMessage extends RestEffect {
+
+		private Expression<String> id;
+		private Expression<ChannelRef> channel;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		protected boolean initRest(Expression<?>[] exprs, int matchedPattern, ParseResult parseResult) {
+			id = (Expression<String>) exprs[0];
+			channel = (Expression<ChannelRef>) exprs[1];
+			return true;
+		}
+
+		@Override
+		protected @Nullable CompletionStage<?> request(PlatformEvent event) {
+			String value = id.getSingle(event);
+			ChannelRef in = channel.getSingle(event);
+			if (value == null || in == null)
+				return null;
+			long parsed;
+			try {
+				parsed = Long.parseLong(value.trim());
+			} catch (NumberFormatException e) {
+				return Outgoing.refused("'" + value + "' isn't a message id");
+			}
+			return Discord.current().actions().fetchMessage(in, parsed);
+		}
+
+		@Override
+		protected Class<?> resultType() {
+			return MessageRef.class;
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "fetch the message with id " + id.toString(event, debug) + " in " + channel.toString(event, debug);
+		}
+	}
+
+	/**
+	 * What a message holds: its text, embeds, author and channel. These read what was known when the message was
+	 * sent, received or fetched; a message rebuilt from an id knows only its channel, so fetch it first.
+	 */
+	public static final class ExprMessagePart extends SimpleExpression<Object> {
+
+		private static final String[] NAMES = {"text", "embeds", "author", "channel"};
+
+		private Expression<MessageRef> message;
+		private int part;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			message = (Expression<MessageRef>) exprs[0];
+			part = parseResult.mark;
+			return true;
+		}
+
+		@Override
+		protected Object @Nullable [] get(PlatformEvent event) {
+			MessageRef value = message.getSingle(event);
+			if (value == null)
+				return null;
+			return switch (part) {
+				case 0 -> value.content() == null ? null : new String[] {value.content()};
+				case 1 -> value.embeds() == null ? null : value.embeds().toArray(Embed[]::new);
+				case 2 -> value.author() == null ? null : new UserRef[] {value.author()};
+				default -> {
+					ChannelRef cached = Discord.current().cachedChannel(value.channel());
+					yield new ChannelRef[] {cached != null ? cached : new ChannelRef(value.channel())};
+				}
+			};
+		}
+
+		@Override
+		public boolean isSingle() {
+			return part != 1;
+		}
+
+		@Override
+		public Class<?> getReturnType() {
+			return switch (part) {
+				case 0 -> String.class;
+				case 1 -> Embed.class;
+				case 2 -> UserRef.class;
+				default -> ChannelRef.class;
+			};
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return NAMES[part] + " of " + message.toString(event, debug);
 		}
 	}
 
@@ -196,8 +373,8 @@ final class RestSyntax {
 		@Override
 		protected boolean initRest(Expression<?>[] exprs, int matchedPattern, ParseResult parseResult) {
 			ephemeral = parseResult.hasTag("ephemeral");
-			if (!getParser().isCurrentEvent(SlashEvent.class)) {
-				Skript.error("Only an interaction, such as a slash command, can be deferred");
+			if (!getParser().isCurrentEvent(SlashEvent.class, io.github.itsnotethann.skord.event.ModalEvent.class)) {
+				Skript.error("Only a slash command or a modal submit can be deferred");
 				return false;
 			}
 			return true;

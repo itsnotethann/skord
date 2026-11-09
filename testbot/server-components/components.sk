@@ -1,0 +1,116 @@
+# Runs on a game-server process. Clicks on the messages it sends come back here through the bot.
+
+on ready:
+	set {_channel} to channel with id "111111111111111111"
+	set {_one} to a primary button with id "pick:1" labeled "One"
+	set {_two} to a primary button with id "pick:2" labeled "Two"
+	send "Pick one" with components {_one} and {_two} to {_channel}
+	if last discord error is set:
+		mark "send failed: %error type of last discord error%"
+	else:
+		mark "sent"
+
+on button click starting with "pick:":
+	set {_parts::*} to component id parts
+	mark "picked %{_parts::2}%"
+	edit the message to "Picked %{_parts::2}%" with no components
+
+slash command menu:
+	description: Shows a menu with a button
+	trigger:
+		set {_open} to a secondary button with id "menu:open" labeled "Open"
+		reply with "Menu" with components {_open} and store it in {_msg}
+		wait for a button click on {_msg} within 5 seconds and store it in {_click}
+		mark "waited for %{_click}%"
+
+on button click "menu:open":
+	mark "opened from the menu"
+	reply ephemerally with "Opened"
+
+# A select menu sent to a channel from a slash command: its selection comes back here with the picked values, and
+# the command's trigger waits for it.
+slash command colors:
+	description: Sends a colour menu to the channel
+	trigger:
+		reply ephemerally with "Sent the menu"
+		set {_menu} to a select menu with id "color" with placeholder "Pick a colour" allowing up to 2 choices
+		add option "Red" with value "red" to {_menu}
+		add option "Blue" with value "blue" described as "Calm" to {_menu}
+		send "Colours" with components {_menu} to channel with id "111111111111111111" and store it in {_msg}
+		wait for a selection on {_msg} within 5 seconds and store it in {_picked::*}
+		reply ephemerally with "You picked %{_picked::*}%"
+
+on select menu "color":
+	edit the message to "Colour: %selected values%" with no components
+
+# A modal shown from a slash command: the bot records that this server showed it, so the submit comes back here.
+slash command feedback:
+	description: Asks for feedback in a modal
+	trigger:
+		set {_modal} to a modal with id "feedback" titled "Server feedback"
+		add paragraph text input with id "text" labeled "Your feedback" with max length 500 to {_modal}
+		add text input with id "rating" labeled "Rating" with min length 1 with max length 2 optional to {_modal}
+		show {_modal} to the user
+
+on modal submit "feedback":
+	mark "server got feedback: %input "text"% (%input "rating"%)"
+	reply ephemerally with "Thanks for the %input "rating"%/5 feedback: %input "text"%"
+
+# A paged embed this server sends and pages itself. Clicks on it come back here; the page is in the button's id. The
+# server first edits the message through an action without components, which keeps the message's route.
+function serverPage(n: number) :: embed:
+	set {_e} to an embed titled "Server page %{_n}%"
+	set description of {_e} to "Page %{_n}% of 3."
+	return {_e}
+
+function serverButtons(n: number) :: components:
+	if {_n} is 1:
+		set {_back} to a secondary disabled button with id "spage:0" labeled "Back"
+	else:
+		set {_back} to a secondary button with id "spage:%{_n} - 1%" labeled "Back"
+	if {_n} is 3:
+		set {_next} to a secondary disabled button with id "spage:4" labeled "Next"
+	else:
+		set {_next} to a secondary button with id "spage:%{_n} + 1%" labeled "Next"
+	return {_back} and {_next}
+
+slash command pages:
+	description: Sends a paged embed to the channel
+	trigger:
+		reply ephemerally with "Sent the pages"
+		send embed serverPage(1) with components serverButtons(1) to channel with id "111111111111111111" and store it in {_msg}
+		set {_first} to serverPage(1)
+		set description of {_first} to "Page 1 of 3, edited by the server."
+		edit message {_msg} to embed {_first}
+		if last discord error is set:
+			mark "pages failed: %last discord error%"
+		else:
+			mark "pages sent"
+
+on button click starting with "spage:":
+	set {_parts::*} to component id parts
+	set {_n} to {_parts::2} parsed as number
+	mark "server paged to %{_n}%"
+	edit the message to embed serverPage({_n}) with components serverButtons({_n})
+
+# Message operations by id through the bridge: edit, fetch and delete, then the message is gone. The first message
+# allows mentions, which the bot's fake shows.
+slash command msgops:
+	description: Edits, fetches and deletes messages by id
+	trigger:
+		reply ephemerally with "Working on it"
+		set {_ch} to channel with id "111111111111111111"
+		set {_site} to a link button to "https://example.com" labeled "Site"
+		send "Hi <@7>" with components {_site} allowing mentions to {_ch}
+		send "Temporary" to {_ch} and store it in {_msg}
+		set {_id} to discord id of {_msg}
+		edit message {_msg} to "Edited by the server" with embed an embed titled "Server embed"
+		fetch message with id {_id} in {_ch} and store it in {_fetched}
+		set {_embeds::*} to embeds of {_fetched}
+		set {_author} to author of {_fetched}
+		mark "server fetched: %text of {_fetched}% with %title of {_embeds::1}%, by %discord id of {_author}%"
+		delete message {_msg}
+		fetch message with id {_id} in {_ch} and store it in {_gone}
+		if {_gone} is not set:
+			mark "server fetch after delete: %error type of last discord error%"
+		reply ephemerally with "Done"

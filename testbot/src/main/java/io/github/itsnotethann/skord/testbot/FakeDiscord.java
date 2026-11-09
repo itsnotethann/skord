@@ -25,6 +25,7 @@ import io.github.itsnotethann.skord.discord.EventSpec;
 import io.github.itsnotethann.skord.discord.FetchProperty;
 import io.github.itsnotethann.skord.discord.GuildRef;
 import io.github.itsnotethann.skord.discord.MemberRef;
+import io.github.itsnotethann.skord.discord.MessageBody;
 import io.github.itsnotethann.skord.discord.MessageRef;
 import io.github.itsnotethann.skord.discord.Responder;
 import io.github.itsnotethann.skord.discord.RoleRef;
@@ -170,26 +171,147 @@ final class FakeDiscord implements Discord, DiscordActions, DiscordEvents {
 
 	@Override
 	public CompletionStage<MessageRef> send(ChannelRef channel, String text) {
+		return send(channel, MessageBody.of(text));
+	}
+
+	@Override
+	public CompletionStage<MessageRef> send(ChannelRef channel, String text,
+			java.util.List<? extends io.github.itsnotethann.skord.discord.MessageComponent> components) {
+		return send(channel, MessageBody.of(text, components.isEmpty() ? null : components));
+	}
+
+	@Override
+	public CompletionStage<MessageRef> send(ChannelRef channel, MessageBody body) {
 		called("send");
 		if (!KNOWN.contains(channel.id()))
 			return gone(DiscordError.Type.UNKNOWN_CHANNEL, "Unknown Channel", 10003);
-		return CompletableFuture.completedFuture(new MessageRef(NEXT_ID.incrementAndGet(), channel.id(), text, text));
+		String problem = body.problem();
+		if (problem != null)
+			return gone(DiscordError.Type.INVALID_INPUT, problem, 0);
+		MessageRef sent = new MessageRef(NEXT_ID.incrementAndGet(), channel.id(), body.text(), body.text(), self(),
+			body.embeds() == null ? List.of() : body.embeds());
+		stored(sent);
+		VIEWS.put(sent.id(), "send: " + describe(body, false));
+		if (body.hasComponents() || body.hasEmbeds()) {
+			lastSent = sent;
+			lastShown = (body.text() + parts(body, false)).strip();
+		}
+		return CompletableFuture.completedFuture(sent);
+	}
+
+	private static volatile @Nullable MessageRef lastSent;
+	private static volatile String lastShown = "";
+	// What the fake last did to each message through the port, by id: "send: ...", "edit: ...", "deleted".
+	private static final Map<Long, String> VIEWS = new ConcurrentHashMap<>();
+	// Messages the fake has sent, by id, so a fetch finds them and an edit keeps what it doesn't change. Deleted ones
+	// are remembered too: an edit, fetch or delete of one is Discord's unknown message.
+	private static final Map<Long, MessageRef> MESSAGES = new ConcurrentHashMap<>();
+	private static final Set<Long> DELETED = ConcurrentHashMap.newKeySet();
+
+	private static void stored(MessageRef message) {
+		MESSAGES.put(message.id(), message);
+	}
+
+	/** The last message sent with buttons, from any process: the one a test then clicks on. */
+	static @Nullable MessageRef lastSent() {
+		return lastSent;
+	}
+
+	/** That message as text plus its buttons, the way responder lines show them. */
+	static String lastShown() {
+		return lastShown;
+	}
+
+	/**
+	 * What the fake last did to this message through the port (not an interaction answer), from any process, with
+	 * every part it set and whether its mentions ping: {@code send: Hi <@7> mentions off}, {@code edit: ...},
+	 * {@code deleted}. Kept per message, so scripts running at the same time don't read each other's.
+	 */
+	static @Nullable String view(long messageId) {
+		return VIEWS.get(messageId);
+	}
+
+	/** Text, then components and embeds as responder lines show them, then whether mentions ping. */
+	private static String describe(MessageBody body, boolean edit) {
+		return (body.text() + parts(body, edit)).strip() + (body.mentions() ? " mentions on" : " mentions off");
+	}
+
+	/**
+	 * Components and embeds as responder lines show them. For a new message only the parts it has show; for an edit
+	 * every part it sets shows, so removing one reads as {@code [no embeds]}.
+	 */
+	static String parts(MessageBody body, boolean edit) {
+		StringBuilder out = new StringBuilder();
+		if (edit ? body.components() != null : body.hasComponents())
+			out.append(' ').append(io.github.itsnotethann.skord.discord.Components.shown(body.components()));
+		if (edit ? body.embeds() != null : body.hasEmbeds())
+			out.append(' ').append(io.github.itsnotethann.skord.discord.Embeds.shown(body.embeds()));
+		return out.toString();
 	}
 
 	@Override
 	public CompletionStage<MessageRef> reply(MessageRef message, String text) {
+		return reply(message, MessageBody.of(text));
+	}
+
+	@Override
+	public CompletionStage<MessageRef> reply(MessageRef message, MessageBody body) {
 		called("reply");
 		if (!KNOWN.contains(message.channel()))
 			return gone(DiscordError.Type.UNKNOWN_CHANNEL, "Unknown Channel", 10003);
-		return CompletableFuture.completedFuture(new MessageRef(NEXT_ID.incrementAndGet(), message.channel(), text, text));
+		String problem = body.problem();
+		if (problem != null)
+			return gone(DiscordError.Type.INVALID_INPUT, problem, 0);
+		MessageRef sent = new MessageRef(NEXT_ID.incrementAndGet(), message.channel(), body.text(), body.text(), self(),
+			body.embeds() == null ? List.of() : body.embeds());
+		stored(sent);
+		VIEWS.put(sent.id(), "reply: " + describe(body, false));
+		return CompletableFuture.completedFuture(sent);
 	}
 
 	@Override
 	public CompletionStage<MessageRef> edit(MessageRef message, String text) {
+		return edit(message, MessageBody.of(text));
+	}
+
+	@Override
+	public CompletionStage<MessageRef> edit(MessageRef message, MessageBody body) {
 		called("edit");
 		if (!KNOWN.contains(message.channel()))
 			return gone(DiscordError.Type.UNKNOWN_CHANNEL, "Unknown Channel", 10003);
-		return CompletableFuture.completedFuture(new MessageRef(message.id(), message.channel(), text, text));
+		if (DELETED.contains(message.id()))
+			return gone(DiscordError.Type.UNKNOWN_MESSAGE, "Unknown Message", 10008);
+		String problem = body.problem();
+		if (problem != null)
+			return gone(DiscordError.Type.INVALID_INPUT, problem, 0);
+		MessageRef before = MESSAGES.getOrDefault(message.id(), message);
+		MessageRef edited = before.after(body);
+		stored(edited);
+		VIEWS.put(message.id(), "edit: " + describe(body, true));
+		return CompletableFuture.completedFuture(edited);
+	}
+
+	@Override
+	public CompletionStage<Void> delete(MessageRef message) {
+		called("delete");
+		if (!KNOWN.contains(message.channel()))
+			return gone(DiscordError.Type.UNKNOWN_CHANNEL, "Unknown Channel", 10003);
+		if (MESSAGES.remove(message.id()) == null)
+			return gone(DiscordError.Type.UNKNOWN_MESSAGE, "Unknown Message", 10008);
+		DELETED.add(message.id());
+		VIEWS.put(message.id(), "deleted");
+		return CompletableFuture.completedFuture(null);
+	}
+
+	@Override
+	public CompletionStage<MessageRef> fetchMessage(ChannelRef channel, long id) {
+		called("fetch-message");
+		if (!KNOWN.contains(channel.id()))
+			return gone(DiscordError.Type.UNKNOWN_CHANNEL, "Unknown Channel", 10003);
+		MessageRef found = MESSAGES.get(id);
+		if (found == null || found.channel() != channel.id())
+			return gone(DiscordError.Type.UNKNOWN_MESSAGE, "Unknown Message", 10008);
+		return CompletableFuture.completedFuture(found);
 	}
 
 	@Override
@@ -272,6 +394,92 @@ final class FakeDiscord implements Discord, DiscordActions, DiscordEvents {
 			@Override
 			public CompletionStage<@Nullable MessageRef> followUp(String text, boolean ephemeral, boolean wantMessage) {
 				return record("follow-up" + (ephemeral ? " ephemerally" : "") + ": " + text);
+			}
+
+			@Override
+			public CompletionStage<@Nullable MessageRef> reply(String text, java.util.List<? extends io.github.itsnotethann.skord.discord.MessageComponent> components,
+					boolean ephemeral, boolean wantMessage) {
+				TestBot.recorder().mark(script, "reply" + (ephemeral ? " ephemerally" : "") + ": " + text + shown(components));
+				MessageRef sent = new MessageRef(NEXT_ID.incrementAndGet(), 111111111111111111L, text, text);
+				lastSent = sent;
+				lastShown = text + shown(components);
+				return CompletableFuture.completedFuture(sent);
+			}
+
+			@Override
+			public CompletionStage<@Nullable MessageRef> editOriginal(String text,
+					java.util.List<? extends io.github.itsnotethann.skord.discord.MessageComponent> components, boolean wantMessage) {
+				return record("edit original: " + text + shown(components));
+			}
+
+			@Override
+			public CompletionStage<@Nullable MessageRef> followUp(String text,
+					java.util.List<? extends io.github.itsnotethann.skord.discord.MessageComponent> components, boolean ephemeral, boolean wantMessage) {
+				return record("follow-up" + (ephemeral ? " ephemerally" : "") + ": " + text + shown(components));
+			}
+
+			@Override
+			public CompletionStage<?> deferUpdate() {
+				return record("defer update");
+			}
+
+			@Override
+			public CompletionStage<@Nullable MessageRef> update(String text,
+					java.util.List<? extends io.github.itsnotethann.skord.discord.MessageComponent> components, boolean wantMessage) {
+				return record("update: " + text + (components == null ? "" : shown(components)));
+			}
+
+			@Override
+			public CompletionStage<?> showModal(io.github.itsnotethann.skord.discord.Modal modal) {
+				return record("modal: " + io.github.itsnotethann.skord.discord.Modals.shown(modal));
+			}
+
+			@Override
+			public CompletionStage<@Nullable MessageRef> reply(MessageBody body, boolean ephemeral, boolean wantMessage) {
+				String line = "reply" + (ephemeral ? " ephemerally" : "") + ": " + content(body, false) + pings(body);
+				if (!body.hasComponents() && !body.hasEmbeds())
+					return record(line);
+				TestBot.recorder().mark(script, line);
+				MessageRef sent = new MessageRef(NEXT_ID.incrementAndGet(), 111111111111111111L, body.text(), body.text(),
+					new UserRef(999999999999999999L, "skord-test"), body.embeds());
+				stored(sent);
+				lastSent = sent;
+				lastShown = content(body, false);
+				return CompletableFuture.completedFuture(sent);
+			}
+
+			@Override
+			public CompletionStage<@Nullable MessageRef> editOriginal(MessageBody body, boolean wantMessage) {
+				return record("edit original: " + content(body, true) + pings(body));
+			}
+
+			@Override
+			public CompletionStage<@Nullable MessageRef> editMessage(String messageId, MessageBody body) {
+				return record("edit message " + messageId + ": " + content(body, true) + pings(body));
+			}
+
+			@Override
+			public CompletionStage<@Nullable MessageRef> followUp(MessageBody body, boolean ephemeral, boolean wantMessage) {
+				return record("follow-up" + (ephemeral ? " ephemerally" : "") + ": " + content(body, false) + pings(body));
+			}
+
+			@Override
+			public CompletionStage<@Nullable MessageRef> update(MessageBody body, boolean wantMessage) {
+				return record("update: " + content(body, true) + pings(body));
+			}
+
+			/** The text and then the parts; with no text, only the parts. */
+			private String content(MessageBody body, boolean edit) {
+				return body.text().isEmpty() ? parts(body, edit).strip() : body.text() + parts(body, edit);
+			}
+
+			/** Shown only when mentions ping, so lines from before mentions read as they did. */
+			private String pings(MessageBody body) {
+				return body.mentions() ? " (mentions)" : "";
+			}
+
+			private String shown(java.util.List<? extends io.github.itsnotethann.skord.discord.MessageComponent> components) {
+				return " " + io.github.itsnotethann.skord.discord.Components.shown(components);
 			}
 
 			private <T> CompletionStage<@Nullable T> record(String request) {

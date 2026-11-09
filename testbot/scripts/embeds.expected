@@ -1,0 +1,27 @@
+read back: Server rules, #5865f2, Updated weekly, Moderators
+send: Please read: [embed title "Server rules" description "Be kind." url https://example.com/rules colour #5865f2 author "Moderators" author icon https://example.com/mod.png author url https://example.com/mods footer "Updated weekly" footer icon https://example.com/clock.png image https://example.com/banner.png thumbnail https://example.com/logo.png timestamp 2027-01-15T08:00:00Z fields {"Rule 1"="No spam", "Rule 2"="No ads" inline, "Rule 3"="Have fun" inline}] mentions off
+send: [embed title "Server rules" description "Be kind." url https://example.com/rules colour #5865f2 author "Moderators" author icon https://example.com/mod.png author url https://example.com/mods footer "Updated weekly" footer icon https://example.com/clock.png image https://example.com/banner.png thumbnail https://example.com/logo.png timestamp 2027-01-15T08:00:00Z fields {"Rule 1"="No spam", "Rule 2"="No ads" inline, "Rule 3"="Have fun" inline}] mentions off
+send: A [success embeds:ok:OK] [embed title "One"] mentions off
+send: B [success embeds:ok:OK] [embed title "Two"] mentions off
+send: Both [success embeds:ok:OK] [embed title "One", embed title "Two"] mentions off
+edit: No embeds now [no embeds] mentions off
+after the edit: No embeds now, embeds left: 0
+edit: [no components] [embed title "Two"] mentions off
+hex colour: #ff8800
+colour kept: #ff8800
+colour removed
+fields: invalid input: Embed 'Crowded' has 26 fields, and Discord allows 25
+description: The description of embed 'Long' is 4097 characters, and Discord allows 4096
+total: The embeds of a message can hold 6000 characters together, and these hold 8198
+count: A message can carry 10 embeds at most, and this one has 11
+empty: The embed is empty; give it a title, a description, a field or an image
+link: The image of embed 'Bad link' is 'ftp://example.com/x.png', which isn't a link; it has to start with https://
+none of them was sent
+reply ephemerally: Here: [primary embeds:more:More] [embed title "Reply" colour #ed4245]
+follow-up: [embed title "Reply" colour #ed4245]
+update: Updated [primary embeds:next:Next] [embed title "New page" fields {"Name"="Value"}]
+update: Cleared [no embeds]
+defer update
+click refused: The description of embed 'Long' is 4097 characters, and Discord allows 4096
+follow-up ephemerally: That page was too long
+! 'not a colour' isn't a colour

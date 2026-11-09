@@ -15,6 +15,9 @@ public final class FrameCodec {
 	/** The protocol version in {@code hello}. A breaking change to a frame bumps it. */
 	public static final int VERSION = 1;
 
+	public static final int META_MAX_ENTRIES = 16;
+	public static final int META_MAX_LENGTH = 128;
+
 	/** Frames larger than this are refused outright, whatever they hold. */
 	public static final int MAX_FRAME_CHARS = 1 << 20;
 
@@ -51,7 +54,7 @@ public final class FrameCodec {
 		String type = string(object, "type");
 		return switch (type) {
 			case "hello" -> new Frame.Hello(integer(object, "v"), string(object, "server"), string(object, "secret"),
-				string(object, "platform"));
+				string(object, "platform"), meta(object));
 			case "welcome" -> {
 				JsonObject bot = object.has("bot") && object.get("bot").isJsonObject()
 					? object.getAsJsonObject("bot") : null;
@@ -86,7 +89,12 @@ public final class FrameCodec {
 				object.has("options") && object.get("options").isJsonObject()
 					? object.getAsJsonObject("options") : new com.google.gson.JsonObject(),
 				Ref.fromJson(object.get("user")), Ref.fromJson(object.get("member")),
-				Ref.fromJson(object.get("guild")), Ref.fromJson(object.get("channel")));
+				Ref.fromJson(object.get("guild")), Ref.fromJson(object.get("channel")),
+				object.has("component") ? object.get("component").getAsString() : null,
+				object.has("message") ? object.get("message").getAsString() : null,
+				strings(object.get("values")),
+				object.has("modal") && object.get("modal").isJsonPrimitive() ? object.get("modal").getAsString() : null,
+				textMap(object.get("inputs")));
 			case "respond" -> {
 				Frame.Respond.Action action = Frame.Respond.Action.of(string(object, "action"));
 				if (action == null)
@@ -94,7 +102,12 @@ public final class FrameCodec {
 				yield new Frame.Respond(string(object, "id"), string(object, "interaction"), action,
 					object.has("text") ? object.get("text").getAsString() : null,
 					object.has("ephemeral") && object.get("ephemeral").getAsBoolean(),
-					object.has("message") ? object.get("message").getAsString() : null);
+					object.has("message") ? object.get("message").getAsString() : null,
+					object.has("components") && object.get("components").isJsonArray()
+						? object.getAsJsonArray("components") : null,
+					object.has("modal") && object.get("modal").isJsonObject() ? object.getAsJsonObject("modal") : null,
+					object.has("embeds") && object.get("embeds").isJsonArray() ? object.getAsJsonArray("embeds") : null,
+					object.has("mentions") && object.get("mentions").getAsBoolean());
 			}
 			case "dispatched" -> new Frame.Dispatched(string(object, "interaction"),
 				object.has("paused") && object.get("paused").getAsBoolean());
@@ -168,6 +181,31 @@ public final class FrameCodec {
 		return value != null && value.isJsonArray() ? value.getAsJsonArray() : new JsonArray();
 	}
 
+	/** Null when absent or not an array, so a button's interaction stays told apart from an empty selection. */
+	private static @org.jetbrains.annotations.Nullable List<String> strings(@org.jetbrains.annotations.Nullable JsonElement value) {
+		if (value == null || !value.isJsonArray())
+			return null;
+		List<String> out = new ArrayList<>();
+		for (JsonElement entry : value.getAsJsonArray()) {
+			if (entry.isJsonPrimitive())
+				out.add(entry.getAsString());
+		}
+		return out;
+	}
+
+	/** A modal submit's inputs: null when absent or not an object; entries that aren't text are left out. */
+	private static java.util.@org.jetbrains.annotations.Nullable Map<String, String> textMap(
+			@org.jetbrains.annotations.Nullable JsonElement value) {
+		if (value == null || !value.isJsonObject())
+			return null;
+		java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+		for (java.util.Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet()) {
+			if (entry.getValue().isJsonPrimitive())
+				out.put(entry.getKey(), entry.getValue().getAsString());
+		}
+		return out;
+	}
+
 	private static List<String> names(JsonObject object, String key) {
 		List<String> out = new ArrayList<>();
 		for (JsonElement entry : array(object, key)) {
@@ -221,6 +259,25 @@ public final class FrameCodec {
 	private static JsonElement data(JsonObject object) {
 		JsonElement value = object.get("data");
 		return value == null ? com.google.gson.JsonNull.INSTANCE : value;
+	}
+
+	private static java.util.Map<String, String> meta(JsonObject object) {
+		if (!object.has("meta") || !object.get("meta").isJsonObject())
+			return java.util.Map.of();
+		java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+		for (java.util.Map.Entry<String, JsonElement> entry : object.getAsJsonObject("meta").entrySet()) {
+			if (out.size() >= META_MAX_ENTRIES)
+				break;
+			JsonElement value = entry.getValue();
+			if (!value.isJsonPrimitive() || entry.getKey().isBlank())
+				continue;
+			out.put(clip(entry.getKey()), clip(value.getAsString()));
+		}
+		return out;
+	}
+
+	private static String clip(String text) {
+		return text.length() <= META_MAX_LENGTH ? text : text.substring(0, META_MAX_LENGTH);
 	}
 
 	private static String string(JsonObject object, String key) throws FrameException {

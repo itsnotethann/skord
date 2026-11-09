@@ -77,6 +77,14 @@ final class FilePlayerLinks implements PlayerLinks {
 	}
 
 	@Override
+	public synchronized void replaceAll(Map<String, String> links) {
+		load();
+		byDiscord.clear();
+		byDiscord.putAll(links);
+		save();
+	}
+
+	@Override
 	public synchronized void clearMemory() {
 		byDiscord.clear();
 		loaded = false;

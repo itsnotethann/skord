@@ -52,6 +52,7 @@ public final class BridgeServer {
 	private final Listener listener;
 	private final Socket socket;
 	private final Map<String, WebSocket> connections = new ConcurrentHashMap<>();
+	private final Map<String, Map<String, String>> meta = new ConcurrentHashMap<>();
 	private final ScheduledExecutorService timers = Executors.newSingleThreadScheduledExecutor(runnable -> {
 		Thread thread = new Thread(runnable, "skord-bridge-timers");
 		thread.setDaemon(true);
@@ -104,6 +105,16 @@ public final class BridgeServer {
 		send(server, new Frame.ScopeUpdate(links.scope(server), links.listen(server)));
 	}
 
+	public java.util.Map<String, String> meta(String server) {
+		return meta.getOrDefault(server, java.util.Map.of());
+	}
+
+	public static String showMeta(java.util.Map<String, String> values) {
+		java.util.StringJoiner out = new java.util.StringJoiner(", ");
+		new java.util.TreeMap<>(values).forEach((key, value) -> out.add(key + "=" + value));
+		return out.toString();
+	}
+
 	/** Cuts a server off, telling it why. Used when its link is revoked. */
 	public void drop(String server, String reason) {
 		WebSocket connection = connections.get(server);
@@ -141,7 +152,11 @@ public final class BridgeServer {
 			previous.close(1000, "replaced");
 		}
 		connection.send(FrameCodec.encode(new Frame.Welcome(bot.get(), HEARTBEAT_MILLIS, links.scope(server))));
-		LOGGER.info("Bridge: server '{}' connected ({})", server, hello.platform());
+		meta.put(server, hello.meta());
+		if (hello.meta().isEmpty())
+			LOGGER.info("Bridge: server '{}' connected ({})", server, hello.platform());
+		else
+			LOGGER.info("Bridge: server '{}' connected ({}, {})", server, hello.platform(), showMeta(hello.meta()));
 		listener.connected(server, hello.platform());
 	}
 

@@ -1,0 +1,30 @@
+modal: report "Report a player" {short who:"Who" 0-32 required placeholder "Their name", paragraph details:"What happened" 10-1000 required, short proof:"Proof link" optional}
+report from 7: Steve said Griefed my house
+no proof
+reply ephemerally: Thanks, we got your report.
+any submit, id report
+report from 8: Alex said Took my diamonds
+proof: https://example.com/clip
+reply ephemerally: Thanks, we got your report.
+any submit, id report
+quiet submit
+any submit, id quiet
+defer ephemerally
+delete original
+vote poll1: yes
+update: Voted yes [no components]
+any submit, id vote:poll1
+quiet submit
+any submit, id quiet
+defer update
+any submit, id noedit
+defer
+edit error: modal noedit is the submit of a modal a slash command opened, so it has no message to edit; answer it with 'reply with'
+edit original: Answered instead
+reply ephemerally: Answered already
+late error: Can't show modal 'late': /late was already answered, and a modal must be an interaction's first response. Show it before any reply or wait.
+defer
+deferred error: Can't show modal 'deferred': /deferred was already deferred, and a modal must be an interaction's first response. Show it before any reply or wait.
+edit original: Deferred, so no modal
+! Text input 'in6' was left out of modal 'full': the modal already has 5 inputs, Discord's limit
+! A modal's title can be at most 45 characters

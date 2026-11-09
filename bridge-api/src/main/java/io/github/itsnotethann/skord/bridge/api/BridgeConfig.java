@@ -12,9 +12,23 @@ import java.util.Map;
  * @param secret        what {@code sk link create} printed. Never logged: see {@link #toString()}.
  * @param timeoutMillis how long a request waits for its answer
  */
-public record BridgeConfig(URI url, String name, String secret, long timeoutMillis) {
+public record BridgeConfig(URI url, String name, String secret, long timeoutMillis, Map<String, String> meta) {
 
 	public static final long DEFAULT_TIMEOUT_MILLIS = 5_000;
+
+	public BridgeConfig {
+		meta = meta == null ? Map.of() : Map.copyOf(meta);
+	}
+
+	public BridgeConfig(URI url, String name, String secret, long timeoutMillis) {
+		this(url, name, secret, timeoutMillis, Map.of());
+	}
+
+	public BridgeConfig withMeta(Map<String, String> more) {
+		Map<String, String> merged = new java.util.LinkedHashMap<>(meta);
+		merged.putAll(more);
+		return new BridgeConfig(url, name, secret, timeoutMillis, merged);
+	}
 
 	/** Reads the keys {@code url}, {@code name}, {@code secret} and optionally {@code timeout} (seconds). */
 	public static BridgeConfig of(Map<?, ?> values) {
@@ -26,7 +40,14 @@ public record BridgeConfig(URI url, String name, String secret, long timeoutMill
 		Object seconds = values.get("timeout");
 		if (seconds != null)
 			timeout = Math.round(Double.parseDouble(String.valueOf(seconds)) * 1000);
-		return new BridgeConfig(uri, text(values, "name"), text(values, "secret"), timeout);
+		Map<String, String> meta = new java.util.LinkedHashMap<>();
+		if (values.get("meta") instanceof Map<?, ?> entries) {
+			for (Map.Entry<?, ?> entry : entries.entrySet()) {
+				if (entry.getKey() != null && entry.getValue() != null)
+					meta.put(String.valueOf(entry.getKey()), String.valueOf(entry.getValue()));
+			}
+		}
+		return new BridgeConfig(uri, text(values, "name"), text(values, "secret"), timeout, meta);
 	}
 
 	private static String text(Map<?, ?> values, String key) {

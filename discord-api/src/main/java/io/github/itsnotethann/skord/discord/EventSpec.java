@@ -8,6 +8,9 @@ public record EventSpec(Kind kind, Map<String, String> filters, boolean held) {
 		READY,
 		MESSAGE,
 		SLASH_COMMAND,
+		BUTTON_CLICK,
+		SELECT_MENU,
+		MODAL_SUBMIT,
 		BOOST_START,
 		TEST_BOOST;
 

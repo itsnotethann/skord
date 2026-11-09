@@ -1,0 +1,91 @@
+# Modals: built with inputs, shown from a slash command, submitted and read by input id, matched by id prefix, and
+# answered each way a submit can be. Only slash commands and submits are fired here: a button click or selection
+# would also run the catch-all handlers in buttons.sk and selects.sk. A modal shown from a click is covered by the
+# componentScripts run (bridge-components/components.sk).
+
+slash command report:
+	description: Report a player
+	trigger:
+		set {_modal} to a modal with id "report" titled "Report a player"
+		add text input with id "who" labeled "Who" with placeholder "Their name" with max length 32 to {_modal}
+		add paragraph text input with id "details" labeled "What happened" with min length 10 with max length 1000 to {_modal}
+		add text input with id "proof" labeled "Proof link" optional to {_modal}
+		show {_modal} to the user
+
+# A modal must be the first answer: after a reply, and after a deferral, showing one fails with a clear error.
+slash command late:
+	description: Replies, then tries a modal
+	trigger:
+		reply ephemerally with "Answered already"
+		set {_modal} to a modal with id "late" titled "Too late"
+		add text input with id "x" labeled "X" to {_modal}
+		open modal {_modal}
+		mark "late error: %last discord error%"
+
+slash command deferred:
+	description: Defers, then tries a modal
+	trigger:
+		defer the reply
+		set {_modal} to a modal with id "deferred" titled "Too late"
+		add text input with id "x" labeled "X" with value "preset" to {_modal}
+		show {_modal}
+		mark "deferred error: %last discord error%"
+		reply with "Deferred, so no modal"
+
+on modal submit "report":
+	mark "report from %discord id of event-user%: %value of input "who"% said %input "details"%"
+	if input "proof" is set:
+		mark "proof: %input "proof"%"
+	else:
+		mark "no proof"
+	reply ephemerally with "Thanks, we got your report."
+
+on modal submit starting with "vote:":
+	set {_parts::*} to component id parts
+	mark "vote %{_parts::2}%: %input "choice"%"
+	edit the message to "Voted %input "choice"%" with no components
+
+# A slash command opened this one, so there is no message to edit.
+on modal submit "noedit":
+	edit the message to "Edited"
+	mark "edit error: %last discord error%"
+	reply with "Answered instead"
+
+on modal submit "quiet":
+	mark "quiet submit"
+
+on modal submit:
+	mark "any submit, id %component id%"
+
+on ready:
+	fire slash command "report" as user "7"
+	fire modal submit "report" with inputs "who=Steve" and "details=Griefed my house" as user "7"
+	fire modal submit "report" with inputs "who=Alex", "details=Took my diamonds" and "proof=https://example.com/clip" as user "8"
+	# Nothing answers it: acknowledged with an ephemeral deferral that is removed at once.
+	fire modal submit "quiet"
+
+on ready:
+	wait 800 milliseconds
+	set {_channel} to channel with id "111111111111111111"
+	send "Poll: yes or no?" to {_channel} and store it in {_poll}
+	# Opened from a component on the poll message: the submit can edit that message, and an unanswered one is
+	# acknowledged without changing it.
+	fire modal submit "vote:poll1" with inputs "choice=yes" on {_poll}
+	fire modal submit "quiet" on {_poll}
+
+on ready:
+	wait 1300 milliseconds
+	fire modal submit "noedit"
+
+on ready:
+	wait 1800 milliseconds
+	fire slash command "late"
+	wait 400 milliseconds
+	fire slash command "deferred"
+
+# Discord's limits: a sixth input is left out with a warning, and a title over 45 characters is a load error.
+on ready:
+	set {_full} to a modal with id "full" titled "Five at most"
+	loop 6 times:
+		add text input with id "in%loop-value%" labeled "Input %loop-value%" to {_full}
+	set {_bad} to a modal with id "bad" titled "This title is far too long for Discord to show it"

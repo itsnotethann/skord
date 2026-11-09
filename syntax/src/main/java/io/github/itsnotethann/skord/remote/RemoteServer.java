@@ -29,9 +29,14 @@ import io.github.itsnotethann.skord.discord.MemberRef;
 import io.github.itsnotethann.skord.discord.MessageRef;
 import io.github.itsnotethann.skord.discord.RoleRef;
 import io.github.itsnotethann.skord.discord.UserRef;
+import io.github.itsnotethann.skord.event.ButtonEvent;
+import io.github.itsnotethann.skord.event.ComponentEvent;
+import io.github.itsnotethann.skord.event.SelectEvent;
+import io.github.itsnotethann.skord.event.ModalEvent;
 import io.github.itsnotethann.skord.event.MessageEvent;
 import io.github.itsnotethann.skord.event.ReadyEvent;
 import io.github.itsnotethann.skord.event.SlashEvent;
+import io.github.itsnotethann.skord.interaction.ClickWaiters;
 import io.github.itsnotethann.skord.interaction.Interaction;
 import io.github.itsnotethann.skord.protocol.CommandSpec;
 import io.github.itsnotethann.skord.protocol.Frame;
@@ -79,6 +84,8 @@ public final class RemoteServer {
 		});
 		listeners.addAll(List.of(extra));
 		Bridge started = Bridge.start(config, platform, listeners.toArray(new Bridge.ConnectionListener[0]));
+		started.onComponent(this::click);
+		started.onModal(this::submit);
 		bridge = started;
 		discord.attach(started);
 		return started;
@@ -179,6 +186,62 @@ public final class RemoteServer {
 		Trigger trigger = CommandRegistry.trigger(context.command());
 		if (trigger != null)
 			trigger.execute(event);
+		Skript.eventBus().fire(event);
+		boolean paused = Delay.isDelayed(event);
+		interaction.afterDispatch(paused);
+		return paused ? new CompletableFuture<>() : null;
+	}
+
+	/** A click or selection on a message this server sent, which the bot routed here. Runs like the bot runs its own clicks. */
+	private @Nullable CompletionStage<?> click(CommandContext context) {
+		String id = context.component();
+		if (id == null)
+			return null;
+		java.util.List<String> values = context.values();
+		Interaction interaction = new Interaction((values == null ? "button " : "select menu ") + id,
+			new ContextResponder(context), true);
+		Ref guildRef = context.guild();
+		long guildId = guildRef == null ? 0 : parse(guildRef.id());
+		Ref userRef = context.user();
+		Ref memberRef = context.member();
+		Ref channelRef = context.channel();
+		long channelId = channelRef == null ? 0 : parse(channelRef.id());
+		String messageId = context.message();
+		MessageRef message = messageId == null ? null : new MessageRef(parse(messageId), channelId);
+		UserRef user = userRef == null ? null : new UserRef(parse(userRef.id()), name(userRef));
+		MemberRef member = memberRef == null ? null : new MemberRef(parse(memberRef.id()), guildId, name(memberRef));
+		ChannelRef channel = channelRef == null ? null : new ChannelRef(channelId, name(channelRef));
+		GuildRef guild = guildRef == null ? null : new GuildRef(guildId, name(guildRef));
+		ComponentEvent event = values == null
+			? new ButtonEvent(id, interaction, message, user, member, channel, guild)
+			: new SelectEvent(id, values, interaction, message, user, member, channel, guild);
+		ClickWaiters.offer(event);
+		Skript.eventBus().fire(event);
+		boolean paused = Delay.isDelayed(event);
+		interaction.afterDispatch(paused);
+		return paused ? new CompletableFuture<>() : null;
+	}
+
+	/** A submit of a modal this server showed, which the bot routed here. Runs like the bot runs its own submits. */
+	private @Nullable CompletionStage<?> submit(CommandContext context) {
+		String id = context.modal();
+		if (id == null)
+			return null;
+		Map<String, String> inputs = context.inputs();
+		String messageId = context.message();
+		Interaction interaction = Interaction.modalSubmit("modal " + id, new ContextResponder(context), messageId != null);
+		Ref guildRef = context.guild();
+		long guildId = guildRef == null ? 0 : parse(guildRef.id());
+		Ref userRef = context.user();
+		Ref memberRef = context.member();
+		Ref channelRef = context.channel();
+		long channelId = channelRef == null ? 0 : parse(channelRef.id());
+		ModalEvent event = new ModalEvent(id, inputs == null ? Map.of() : inputs, interaction,
+			messageId == null ? null : new MessageRef(parse(messageId), channelId),
+			userRef == null ? null : new UserRef(parse(userRef.id()), name(userRef)),
+			memberRef == null ? null : new MemberRef(parse(memberRef.id()), guildId, name(memberRef)),
+			channelRef == null ? null : new ChannelRef(channelId, name(channelRef)),
+			guildRef == null ? null : new GuildRef(guildId, name(guildRef)));
 		Skript.eventBus().fire(event);
 		boolean paused = Delay.isDelayed(event);
 		interaction.afterDispatch(paused);

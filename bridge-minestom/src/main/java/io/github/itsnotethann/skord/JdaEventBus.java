@@ -35,6 +35,22 @@ public final class JdaEventBus implements net.dv8tion.jda.api.hooks.EventListene
 
 		public interface Forwarder {
 		boolean forward(List<String> owners, SlashEvent slash, boolean delayed);
+
+		/**
+		 * Sends a modal submit to the server that showed the modal. False when no server showed it, and the bot's own
+		 * handlers settle the submit.
+		 */
+		default boolean forwardModal(io.github.itsnotethann.skord.event.ModalEvent submit, boolean delayed) {
+			return false;
+		}
+
+		/**
+		 * Sends a click to the server that sent the message it is on. False when no server sent it, and the bot's
+		 * own handlers settle the click.
+		 */
+		default boolean forwardComponent(io.github.itsnotethann.skord.event.ComponentEvent click, boolean delayed) {
+			return false;
+		}
 	}
 
 	private final JdaHost host;
@@ -124,6 +140,12 @@ public final class JdaEventBus implements net.dv8tion.jda.api.hooks.EventListene
 			return JdaRefs.message(message);
 		if (event instanceof SlashCommandInteractionEvent slash)
 			return JdaRefs.slash(slash);
+		if (event instanceof net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent button)
+			return JdaRefs.button(button);
+		if (event instanceof net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent select)
+			return JdaRefs.select(select);
+		if (event instanceof net.dv8tion.jda.api.events.interaction.ModalInteractionEvent submit)
+			return JdaRefs.modal(submit);
 		return null;
 	}
 
@@ -135,6 +157,8 @@ public final class JdaEventBus implements net.dv8tion.jda.api.hooks.EventListene
 	}
 
 	private void dispatch(Event event) {
+		if (event instanceof io.github.itsnotethann.skord.event.ComponentEvent used)
+			io.github.itsnotethann.skord.interaction.ClickWaiters.offer(used);
 		List<String> owners = List.of();
 		if (event instanceof SlashEvent slash) {
 			owners = CommandRegistry.owners(slash.command());
@@ -147,6 +171,18 @@ public final class JdaEventBus implements net.dv8tion.jda.api.hooks.EventListene
 		if (!owners.isEmpty() && event instanceof SlashEvent slash) {
 			Forwarder current = forwarder;
 			if (current != null && current.forward(owners, slash, Delay.isDelayed(event)))
+				return;
+		}
+		// A click or selection on a message a server sent: that server handles it, and its 'dispatched' settles the click.
+		if (event instanceof io.github.itsnotethann.skord.event.ComponentEvent click) {
+			Forwarder current = forwarder;
+			if (current != null && current.forwardComponent(click, Delay.isDelayed(event)))
+				return;
+		}
+		// A submit of a modal a server showed: that server handles it, and its 'dispatched' settles the submit.
+		if (event instanceof io.github.itsnotethann.skord.event.ModalEvent submit) {
+			Forwarder current = forwarder;
+			if (current != null && current.forwardModal(submit, Delay.isDelayed(event)))
 				return;
 		}
 		if (event instanceof InteractionEvent interaction)

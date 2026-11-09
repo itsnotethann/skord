@@ -1,0 +1,54 @@
+# Select menus: built with options, sent beside a button, a selection matched by id or id prefix, its values read, and
+# the selection answered by editing the message. Only selections are fired here, so buttons.sk's handlers stay quiet.
+
+on select menu "open":
+	set {_menu} to a select menu with id "role" with placeholder "Pick roles" allowing 0 to 2 choices
+	add default option "Red" with value "red" described as "The red team" to {_menu}
+	add option "Blue" with value "blue" with emoji "<:blue:123>" to {_menu}
+	add option "Green" with value "green" to {_menu}
+	set {_done} to a success button with id "roles:done" labeled "Done"
+	reply with "Choose:" with components {_menu} and {_done}
+
+on select menu "role":
+	set {_picked::*} to selected values
+	mark "role picked %size of {_picked::*}%: %{_picked::*}%"
+	edit the message to "Roles: %{_picked::*}%" with no components
+
+on select menu starting with "shop:":
+	set {_parts::*} to component id parts
+	mark "shop %{_parts::2}% picked %selected value%"
+	set {_closed} to a disabled select menu with id "shop:closed" with placeholder "Sold out"
+	add option "None" with value "none" to {_closed}
+	edit the message to "Bought." with components {_closed}
+
+on select menu:
+	mark "any selection, id %component id%"
+
+on select menu "silent":
+	mark "silent handler"
+
+on ready:
+	fire select menu "open"
+	fire select menu "role" with values "red" and "blue"
+	fire select menu "shop:hats" with values "cap"
+	fire select menu "silent"
+
+# A menu sent to a channel, its range capped to its option count, and a wait for a selection on it.
+on ready:
+	wait 800 milliseconds
+	set {_channel} to channel with id "111111111111111111"
+	set {_menu} to a select menu with id "wait:pick" allowing up to 3 choices
+	add option "A" with value "a" to {_menu}
+	add option "B" with value "b" to {_menu}
+	send "Pick:" with components {_menu} to {_channel} and store it in {-selects.waiting}
+	mark "sent: %last fake message text%"
+	wait for a selection on {-selects.waiting} by user with id "7" within 3 seconds and store it in {_values::*}
+	mark "waited values: %{_values::*}%"
+	wait for a selection on {-selects.waiting} within 200 milliseconds and store it in {_none::*}
+	if {_none::*} is not set:
+		mark "no selection in time, nothing stored"
+
+on ready:
+	wait 1300 milliseconds
+	fire select menu "wait:pick" with values "b" on {-selects.waiting} as user "8"
+	fire select menu "wait:pick" with values "a" and "b" on {-selects.waiting} as user "7"

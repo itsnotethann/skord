@@ -1,6 +1,7 @@
 package io.github.itsnotethann.skord.protocol;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.google.gson.JsonArray;
@@ -23,7 +24,15 @@ public sealed interface Frame {
 	record BotInfo(String id, String name) {}
 
 	/** First frame from a server. The secret is never printed: see {@link #toString()}. */
-	record Hello(int v, String server, String secret, String platform) implements Frame {
+	record Hello(int v, String server, String secret, String platform, Map<String, String> meta) implements Frame {
+
+		public Hello {
+			meta = meta == null ? Map.of() : Map.copyOf(meta);
+		}
+
+		public Hello(int v, String server, String secret, String platform) {
+			this(v, server, secret, platform, Map.of());
+		}
 
 		@Override
 		public String type() {
@@ -36,11 +45,16 @@ public sealed interface Frame {
 			out.addProperty("server", server);
 			out.addProperty("secret", secret);
 			out.addProperty("platform", platform);
+			if (!meta.isEmpty()) {
+				JsonObject values = new JsonObject();
+				new java.util.TreeMap<>(meta).forEach(values::addProperty);
+				out.add("meta", values);
+			}
 		}
 
 		@Override
 		public String toString() {
-			return "Hello[v=" + v + ", server=" + server + ", secret=<hidden>, platform=" + platform + "]";
+			return "Hello[v=" + v + ", server=" + server + ", secret=<hidden>, platform=" + platform + ", meta=" + meta + "]";
 		}
 	}
 
@@ -128,11 +142,52 @@ public sealed interface Frame {
 	}
 
 	/**
-	 * Someone ran one of the server's commands. {@code options} holds the argument values: text, numbers and
-	 * booleans as themselves, Discord objects as {@code {id, name}}.
+	 * Someone ran one of the server's commands, or clicked a component on a message the server sent. For a
+	 * command, {@code options} holds the argument values: text, numbers and booleans as themselves, Discord objects
+	 * as {@code {id, name}}. For a click, {@code component} is the component's id, {@code message} the id of the
+	 * message it is on, and {@code command} is empty. For a select menu, {@code values} holds the values picked
+	 * (possibly none); it is absent for a button, which is how the two are told apart. For a modal submit,
+	 * {@code modal} is the modal's id, {@code inputs} each text input's value by input id, {@code component} is
+	 * absent, and {@code message} is the message whose component opened the modal (absent when a command did).
 	 */
 	record Interaction(String id, String command, JsonObject options, @Nullable Ref user, @Nullable Ref member,
-					   @Nullable Ref guild, @Nullable Ref channel) implements Frame {
+					   @Nullable Ref guild, @Nullable Ref channel, @Nullable String component,
+					   @Nullable String message, @Nullable List<String> values, @Nullable String modal,
+					   @Nullable java.util.Map<String, String> inputs) implements Frame {
+
+		public Interaction {
+			values = values == null ? null : List.copyOf(values);
+			inputs = inputs == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(inputs));
+		}
+
+		public Interaction(String id, String command, JsonObject options, @Nullable Ref user, @Nullable Ref member,
+						   @Nullable Ref guild, @Nullable Ref channel) {
+			this(id, command, options, user, member, guild, channel, null, null, null);
+		}
+
+		public Interaction(String id, String command, JsonObject options, @Nullable Ref user, @Nullable Ref member,
+						   @Nullable Ref guild, @Nullable Ref channel, @Nullable String component,
+						   @Nullable String message, @Nullable List<String> values) {
+			this(id, command, options, user, member, guild, channel, component, message, values, null, null);
+		}
+
+		public boolean isModalSubmit() {
+			return modal != null;
+		}
+
+		public Interaction(String id, String command, JsonObject options, @Nullable Ref user, @Nullable Ref member,
+						   @Nullable Ref guild, @Nullable Ref channel, @Nullable String component,
+						   @Nullable String message) {
+			this(id, command, options, user, member, guild, channel, component, message, null);
+		}
+
+		public boolean isComponent() {
+			return component != null;
+		}
+
+		public boolean isSelection() {
+			return component != null && values != null;
+		}
 
 		@Override
 		public String type() {
@@ -152,18 +207,60 @@ public sealed interface Frame {
 				out.add("guild", guild.toJson());
 			if (channel != null)
 				out.add("channel", channel.toJson());
+			if (component != null)
+				out.addProperty("component", component);
+			if (message != null)
+				out.addProperty("message", message);
+			if (values != null) {
+				JsonArray picked = new JsonArray();
+				values.forEach(picked::add);
+				out.add("values", picked);
+			}
+			if (modal != null)
+				out.addProperty("modal", modal);
+			if (inputs != null) {
+				JsonObject typed = new JsonObject();
+				inputs.forEach(typed::addProperty);
+				out.add("inputs", typed);
+			}
 		}
 	}
 
 	/**
 	 * Answers an interaction. {@code id} names this request, for its {@link Result}; {@code interaction} is the
 	 * interaction being answered. {@code message} is the message to edit, or absent for the original reply.
+	 * {@code components} are the buttons and select menus to put under the message (see {@code Components} in
+	 * discord-api for the shape): absent leaves them as they are (for an edit or
+	 * update) or sends none, an empty array removes them. {@code update} and {@code defer-update} answer a click
+	 * by changing the message the component is on. {@code modal} answers with {@code modal} set to the modal (see
+	 * {@code Modals} in discord-api for the shape); it has to be the interaction's first answer.
+	 */
+	/**
+	 * An answer to an interaction. {@code components} and {@code embeds}: absent leaves the message's as they are,
+	 * empty removes them. {@code mentions} lets the text's mentions ping; absent (and from older servers) is false.
 	 */
 	record Respond(String id, String interaction, Action action, @Nullable String text, boolean ephemeral,
-				   @Nullable String message) implements Frame {
+				   @Nullable String message, @Nullable JsonArray components, @Nullable JsonObject modal,
+				   @Nullable JsonArray embeds, boolean mentions) implements Frame {
+
+		public Respond(String id, String interaction, Action action, @Nullable String text, boolean ephemeral,
+					   @Nullable String message, @Nullable JsonArray components, @Nullable JsonObject modal) {
+			this(id, interaction, action, text, ephemeral, message, components, modal, null, false);
+		}
+
+		public Respond(String id, String interaction, Action action, @Nullable String text, boolean ephemeral,
+					   @Nullable String message) {
+			this(id, interaction, action, text, ephemeral, message, null, null);
+		}
+
+		public Respond(String id, String interaction, Action action, @Nullable String text, boolean ephemeral,
+					   @Nullable String message, @Nullable JsonArray components) {
+			this(id, interaction, action, text, ephemeral, message, components, null);
+		}
 
 		public enum Action {
-			REPLY("reply"), DEFER("defer"), EDIT("edit"), FOLLOW_UP("follow-up"), DELETE("delete");
+			REPLY("reply"), DEFER("defer"), EDIT("edit"), FOLLOW_UP("follow-up"), DELETE("delete"),
+			UPDATE("update"), DEFER_UPDATE("defer-update"), MODAL("modal");
 
 			public final String wire;
 
@@ -195,6 +292,14 @@ public sealed interface Frame {
 			out.addProperty("ephemeral", ephemeral);
 			if (message != null)
 				out.addProperty("message", message);
+			if (components != null)
+				out.add("components", components);
+			if (modal != null)
+				out.add("modal", modal);
+			if (embeds != null)
+				out.add("embeds", embeds);
+			if (mentions)
+				out.addProperty("mentions", true);
 		}
 	}
 

@@ -1,0 +1,59 @@
+# Message operations: edit, delete and fetch by id, a message that's gone (Discord's unknown message, as an error
+# type a script can test), what a message holds, and mentions that don't ping unless the script allows them.
+# Clicks here start with "msgs:", which buttons.sk's catch-all leaves alone. Everything waits until the other
+# scripts' timing-sensitive steps are over, and reads each message's own fake view rather than a shared "last".
+
+on ready:
+	wait 2500 milliseconds
+	set {_ch} to channel with id "111111111111111111"
+
+	# Mentions are off unless allowed.
+	send "Hello <@7>" to {_ch} and store it in {_m}
+	mark fake view of {_m}
+	send "Hello again <@7>" allowing mentions to {_ch} and store it in {_loud}
+	mark fake view of {_loud}
+	reply to {_m} with "Replying to <@7>" and store it in {_reply}
+	mark fake view of {_reply}
+	reply to {_m} with "Replying to <@7> again" allowing mentions and store it in {_reply}
+	mark fake view of {_reply}
+
+	# What a sent message holds.
+	set {_author} to author of {_m}
+	mark "text: %text of {_m}%, author: %discord id of {_author}%, channel: %discord id of channel of {_m}%"
+
+	# Edit, fetch by id, delete, then the message is gone.
+	set {_id} to discord id of {_m}
+	edit message {_m} to "Edited"
+	mark fake view of {_m}
+	fetch message with id {_id} in {_ch} and store it in {_fetched}
+	mark "fetched: %text of {_fetched}%"
+	delete message {_m}
+	mark fake view of {_m}
+	fetch message with id {_id} in {_ch} and store it in {_gone}
+	if {_gone} is not set:
+		mark "fetch after delete: %error type of last discord error% (%error code of last discord error%)"
+	delete message {_m}
+	if error type of last discord error is unknown message:
+		mark "delete again: unknown message, tested as a type"
+	edit message {_m} to "Too late"
+	mark "edit after delete: %error type of last discord error%"
+	fetch message with id "123" in {_ch} and store it in {_never}
+	if {_never} is not set:
+		mark "never sent: %error type of last discord error%"
+	fetch message with id "not a number" in {_ch} and store it in {_never}
+	mark "not an id: %error type of last discord error%: %last discord error%"
+
+	# A fetched message keeps its embeds.
+	set {_card} to an embed titled "Kept"
+	send "With an embed" with embed {_card} to {_ch} and store it in {_withEmbed}
+	fetch message with id (discord id of {_withEmbed}) in {_ch} and store it in {_again}
+	set {_embeds::*} to embeds of {_again}
+	mark "fetched embed: %title of {_embeds::1}%, %size of {_embeds::*}% in all"
+
+	# Interaction answers: mentions are off, and on when allowed.
+	fire button click "msgs:ping"
+	wait 200 milliseconds
+
+on button click "msgs:ping":
+	reply with "Quiet <@7>"
+	reply with "Loud <@7>" allowing mentions

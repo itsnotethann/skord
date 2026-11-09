@@ -42,6 +42,14 @@ final class TestSyntax {
 		Skript.registerEvent("Test",EvtTest.class, TestEvent.class, "test %string%");
 		Skript.registerEffect(EffMark.class, "mark %objects%");
 		Skript.registerEffect(EffFireTest.class, "fire test event %string%");
+		Skript.registerEffect(EffFireButton.class, "fire button click %string% [on %-discordmessage%] [as user %-string%]");
+		Skript.registerEffect(EffFireSelect.class,
+			"fire select menu %string% [with values %-strings%] [on %-discordmessage%] [as user %-string%]");
+		Skript.registerEffect(EffFireModal.class,
+			"fire modal submit %string% [with inputs %-strings%] [on %-discordmessage%] [as user %-string%]");
+		Skript.registerExpression(ExprLastSent.class, Object.class, ExpressionType.SIMPLE,
+			"[the] last fake message", "[the] last fake message text");
+		Skript.registerExpression(ExprFakeView.class, String.class, ExpressionType.PROPERTY, "[the] fake view of %discordmessage%");
 		Skript.registerEffect(EffFireSlash.class, "fire slash command %string% [with options %-strings%] [as user %-string%]");
 		Skript.registerEffect(EffFakeRequest.class, RestEffect.rest("fake request %string%"));
 		Skript.registerEffect(EffSettle.class, "complete fake request %string% with %string%",
@@ -174,6 +182,211 @@ final class TestSyntax {
 		@Override
 		public String toString(@Nullable PlatformEvent event, boolean debug) {
 			return "fire test event " + name.toString(event, debug);
+		}
+	}
+
+	/**
+	 * Fires a click through the bot's event bus, as JDA would: on message 1 unless one is given, so a click on a
+	 * message a server sent goes to that server.
+	 */
+	public static final class EffFireButton extends Effect {
+
+		private Expression<String> id;
+		private @Nullable Expression<io.github.itsnotethann.skord.discord.MessageRef> message;
+		private @Nullable Expression<String> user;
+		private String script;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			id = (Expression<String>) exprs[0];
+			message = (Expression<io.github.itsnotethann.skord.discord.MessageRef>) exprs[1];
+			user = (Expression<String>) exprs[2];
+			script = scriptName(getParser().getCurrentScript());
+			return true;
+		}
+
+		@Override
+		protected void execute(PlatformEvent event) {
+			String value = id.getSingle(event);
+			if (value == null)
+				return;
+			io.github.itsnotethann.skord.discord.MessageRef on = message == null ? null : message.getSingle(event);
+			if (on == null)
+				on = new io.github.itsnotethann.skord.discord.MessageRef(1, 1);
+			String userId = user == null ? null : user.getSingle(event);
+			Interaction interaction = new Interaction("button " + value, FakeDiscord.responder(script), true);
+			Skript.eventBus().fire(new io.github.itsnotethann.skord.event.ButtonEvent(value, interaction, on,
+				new io.github.itsnotethann.skord.discord.UserRef(userId == null ? 42 : Long.parseLong(userId), "tester"),
+				null, null, null));
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "fire button click " + id.toString(event, debug);
+		}
+	}
+
+	/**
+	 * Fires a selection through the bot's event bus, as JDA would: on message 1 unless one is given, so a selection
+	 * on a message a server sent goes to that server. Without values, nothing was picked.
+	 */
+	public static final class EffFireSelect extends Effect {
+
+		private Expression<String> id;
+		private @Nullable Expression<String> values;
+		private @Nullable Expression<io.github.itsnotethann.skord.discord.MessageRef> message;
+		private @Nullable Expression<String> user;
+		private String script;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			id = (Expression<String>) exprs[0];
+			values = (Expression<String>) exprs[1];
+			message = (Expression<io.github.itsnotethann.skord.discord.MessageRef>) exprs[2];
+			user = (Expression<String>) exprs[3];
+			script = scriptName(getParser().getCurrentScript());
+			return true;
+		}
+
+		@Override
+		protected void execute(PlatformEvent event) {
+			String value = id.getSingle(event);
+			if (value == null)
+				return;
+			io.github.itsnotethann.skord.discord.MessageRef on = message == null ? null : message.getSingle(event);
+			if (on == null)
+				on = new io.github.itsnotethann.skord.discord.MessageRef(1, 1);
+			String userId = user == null ? null : user.getSingle(event);
+			java.util.List<String> picked = values == null ? java.util.List.of() : java.util.List.of(values.getArray(event));
+			Interaction interaction = new Interaction("select menu " + value, FakeDiscord.responder(script), true);
+			Skript.eventBus().fire(new io.github.itsnotethann.skord.event.SelectEvent(value, picked, interaction, on,
+				new io.github.itsnotethann.skord.discord.UserRef(userId == null ? 42 : Long.parseLong(userId), "tester"),
+				null, null, null));
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "fire select menu " + id.toString(event, debug);
+		}
+	}
+
+	/**
+	 * Fires a modal submit through the bot's event bus, as JDA would. Inputs are {@code "id=value"}. With
+	 * {@code on <message>} the modal came from a component on that message, so {@code edit the message to} can answer
+	 * it; without, a slash command opened it. As user 42 unless one is given; a submit routes to the server that
+	 * showed that user that modal.
+	 */
+	public static final class EffFireModal extends Effect {
+
+		private Expression<String> id;
+		private @Nullable Expression<String> inputs;
+		private @Nullable Expression<io.github.itsnotethann.skord.discord.MessageRef> message;
+		private @Nullable Expression<String> user;
+		private String script;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			id = (Expression<String>) exprs[0];
+			inputs = (Expression<String>) exprs[1];
+			message = (Expression<io.github.itsnotethann.skord.discord.MessageRef>) exprs[2];
+			user = (Expression<String>) exprs[3];
+			script = scriptName(getParser().getCurrentScript());
+			return true;
+		}
+
+		@Override
+		protected void execute(PlatformEvent event) {
+			String value = id.getSingle(event);
+			if (value == null)
+				return;
+			io.github.itsnotethann.skord.discord.MessageRef on = message == null ? null : message.getSingle(event);
+			String userId = user == null ? null : user.getSingle(event);
+			Map<String, String> typed = new java.util.LinkedHashMap<>();
+			for (String input : inputs == null ? new String[0] : inputs.getArray(event)) {
+				String[] parts = input.split("=", 2);
+				typed.put(parts[0], parts.length > 1 ? parts[1] : "");
+			}
+			Interaction interaction = Interaction.modalSubmit("modal " + value, FakeDiscord.responder(script), on != null);
+			Skript.eventBus().fire(new io.github.itsnotethann.skord.event.ModalEvent(value, typed, interaction, on,
+				new io.github.itsnotethann.skord.discord.UserRef(userId == null ? 42 : Long.parseLong(userId), "tester"),
+				null, null, null));
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "fire modal submit " + id.toString(event, debug);
+		}
+	}
+
+	public static final class ExprLastSent extends SimpleExpression<Object> {
+
+		private boolean text;
+
+		@Override
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			text = matchedPattern == 1;
+			return true;
+		}
+
+		@Override
+		protected Object @Nullable [] get(PlatformEvent event) {
+			if (text)
+				return new Object[] {FakeDiscord.lastShown()};
+			io.github.itsnotethann.skord.discord.MessageRef sent = FakeDiscord.lastSent();
+			return sent == null ? null : new Object[] {sent};
+		}
+
+		@Override
+		public boolean isSingle() {
+			return true;
+		}
+
+		@Override
+		public Class<?> getReturnType() {
+			return text ? String.class : io.github.itsnotethann.skord.discord.MessageRef.class;
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return text ? "last fake message text" : "last fake message";
+		}
+	}
+
+	/** What the fake last did to a message through the port, with every part it set; see {@link FakeDiscord#view}. */
+	public static final class ExprFakeView extends SimpleExpression<String> {
+
+		private Expression<io.github.itsnotethann.skord.discord.MessageRef> message;
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean isDelayed, ParseResult parseResult) {
+			message = (Expression<io.github.itsnotethann.skord.discord.MessageRef>) exprs[0];
+			return true;
+		}
+
+		@Override
+		protected String @Nullable [] get(PlatformEvent event) {
+			io.github.itsnotethann.skord.discord.MessageRef value = message.getSingle(event);
+			String view = value == null ? null : FakeDiscord.view(value.id());
+			return view == null ? null : new String[] {view};
+		}
+
+		@Override
+		public boolean isSingle() {
+			return true;
+		}
+
+		@Override
+		public Class<? extends String> getReturnType() {
+			return String.class;
+		}
+
+		@Override
+		public String toString(@Nullable PlatformEvent event, boolean debug) {
+			return "fake view of " + message.toString(event, debug);
 		}
 	}
 

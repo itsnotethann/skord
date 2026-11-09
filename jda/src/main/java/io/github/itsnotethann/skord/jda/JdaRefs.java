@@ -10,6 +10,8 @@ import io.github.itsnotethann.skord.discord.MemberRef;
 import io.github.itsnotethann.skord.discord.MessageRef;
 import io.github.itsnotethann.skord.discord.RoleRef;
 import io.github.itsnotethann.skord.discord.UserRef;
+import io.github.itsnotethann.skord.event.ButtonEvent;
+import io.github.itsnotethann.skord.event.SelectEvent;
 import io.github.itsnotethann.skord.event.MessageEvent;
 import io.github.itsnotethann.skord.event.SlashEvent;
 import io.github.itsnotethann.skord.interaction.Interaction;
@@ -22,6 +24,7 @@ import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.entities.channel.concrete.Category;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import org.jetbrains.annotations.Nullable;
@@ -56,7 +59,7 @@ public final class JdaRefs {
 
 	public static MessageRef message(Message message) {
 		return new MessageRef(message.getIdLong(), message.getChannelIdLong(), message.getContentRaw(),
-			message.getContentDisplay());
+			message.getContentDisplay(), user(message.getAuthor()), JdaMessages.fromJda(message.getEmbeds()));
 	}
 
 	public static MessageEvent message(MessageReceivedEvent jda) {
@@ -82,6 +85,40 @@ public final class JdaRefs {
 		}
 		String name = jda.getFullCommandName();
 		return new SlashEvent(name, new Interaction("/" + name, new JdaResponder(jda)), options, user(jda.getUser()),
+			jda.getMember() == null ? null : member(jda.getMember()),
+			jda.getChannel() instanceof MessageChannel channel ? channel(channel) : null,
+			jda.isFromGuild() ? guild(jda.getGuild()) : null);
+	}
+
+	public static ButtonEvent button(ButtonInteractionEvent jda) {
+		String id = jda.getComponentId();
+		return new ButtonEvent(id, new Interaction("button " + id, new JdaResponder(jda), true), message(jda.getMessage()),
+			user(jda.getUser()), jda.getMember() == null ? null : member(jda.getMember()),
+			jda.getChannel() instanceof MessageChannel channel ? channel(channel) : null,
+			jda.isFromGuild() ? guild(jda.getGuild()) : null);
+	}
+
+	public static SelectEvent select(net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent jda) {
+		String id = jda.getComponentId();
+		return new SelectEvent(id, jda.getValues(), new Interaction("select menu " + id, new JdaResponder(jda), true),
+			message(jda.getMessage()), user(jda.getUser()), jda.getMember() == null ? null : member(jda.getMember()),
+			jda.getChannel() instanceof MessageChannel channel ? channel(channel) : null,
+			jda.isFromGuild() ? guild(jda.getGuild()) : null);
+	}
+
+	/** A modal submit; its inputs by id, in the modal's order. An optional input left empty reads as empty text. */
+	public static io.github.itsnotethann.skord.event.ModalEvent modal(
+			net.dv8tion.jda.api.events.interaction.ModalInteractionEvent jda) {
+		String id = jda.getModalId();
+		java.util.Map<String, String> inputs = new java.util.LinkedHashMap<>();
+		for (net.dv8tion.jda.api.interactions.modals.ModalMapping value : jda.getValues()) {
+			if (value.getType() == net.dv8tion.jda.api.components.Component.Type.TEXT_INPUT)
+				inputs.put(value.getCustomId(), value.getAsString());
+		}
+		Message from = jda.getMessage();
+		return new io.github.itsnotethann.skord.event.ModalEvent(id, inputs,
+			Interaction.modalSubmit("modal " + id, new JdaResponder(jda), from != null),
+			from == null ? null : message(from), user(jda.getUser()),
 			jda.getMember() == null ? null : member(jda.getMember()),
 			jda.getChannel() instanceof MessageChannel channel ? channel(channel) : null,
 			jda.isFromGuild() ? guild(jda.getGuild()) : null);

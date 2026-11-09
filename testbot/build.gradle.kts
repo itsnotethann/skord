@@ -125,9 +125,24 @@ val functionScripts by tasks.registering(JavaExec::class) {
 	outputs.upToDateWhen { false }
 }
 
+// Components: a click goes to the process that sent the message, so it needs a real server process.
+val componentScripts by tasks.registering(JavaExec::class) {
+	group = "verification"
+	dependsOn(tasks.classes)
+	classpath = sourceSets.main.get().runtimeClasspath
+	mainClass.set("io.github.itsnotethann.skord.testbot.TestBot")
+	systemProperty("skord.ack-watchdog-ms", "1500")
+	args(layout.projectDirectory.dir("bridge-components").asFile.absolutePath,
+		layout.buildDirectory.dir("componenttest").get().asFile.absolutePath,
+		layout.projectDirectory.dir("server-components").asFile.absolutePath)
+	inputs.dir(layout.projectDirectory.dir("bridge-components"))
+	inputs.dir(layout.projectDirectory.dir("server-components"))
+	outputs.upToDateWhen { false }
+}
+
 // One command runs all of it: the scripts, then the bridge, then the scripts that use it.
 botTest {
-	dependsOn(bridgeTest, bridgeScripts, remoteScripts, heldScripts, sharedScripts, functionScripts)
+	dependsOn(bridgeTest, bridgeScripts, remoteScripts, heldScripts, sharedScripts, functionScripts, componentScripts)
 }
 
 tasks.check {

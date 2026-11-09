@@ -1,0 +1,124 @@
+# Embeds: one expression makes an embed, effects and properties change it, and it goes on a message with or without
+# text and next to components. A message whose embeds break one of Discord's limits is left out whole, with an error.
+# Clicks here start with "embeds:", which buttons.sk's catch-all leaves alone. Everything waits until the other
+# scripts' timing-sensitive steps are over, and reads each message's own fake view rather than a shared "last".
+
+on ready:
+	wait 2 seconds
+	set {_ch} to channel with id "111111111111111111"
+
+	# Every part set, and shown in full by the fake.
+	set {_e} to a new embed titled "Server rules"
+	set description of {_e} to "Be kind."
+	set url of {_e} to "https://example.com/rules"
+	set colour of {_e} to "blurple"
+	set author name of {_e} to "Moderators"
+	set author icon of {_e} to "https://example.com/mod.png"
+	set author url of {_e} to "https://example.com/mods"
+	set footer of {_e} to "Updated weekly"
+	set footer icon of {_e} to "https://example.com/clock.png"
+	set image of {_e} to "https://example.com/banner.png"
+	set thumbnail of {_e} to "https://example.com/logo.png"
+	set timestamp of {_e} to unix date of 1800000000
+	add field "Rule 1" with value "No spam" to {_e}
+	add inline field "Rule 2" with value "No ads" to {_e}
+	add inline field "Rule 3" with value "Have fun" to {_e}
+	mark "read back: %title of {_e}%, %colour of {_e}%, %footer of {_e}%, %{_e}'s author name%"
+	send "Please read:" with embed {_e} to {_ch} and store it in {_m}
+	mark fake view of {_m}
+
+	# No text, only the embed.
+	send embed {_e} to {_ch} and store it in {_m}
+	mark fake view of {_m}
+
+	# Embeds and components, in both orders.
+	set {_ok} to a success button with id "embeds:ok" labeled "OK"
+	set {_one} to an embed titled "One"
+	set {_two} to an embed titled "Two"
+	send "A" with embed {_one} with components {_ok} to {_ch} and store it in {_m}
+	mark fake view of {_m}
+	send "B" with components {_ok} with embed {_two} to {_ch} and store it in {_m}
+	mark fake view of {_m}
+
+	# Two embeds on one message, then edits: removing the embeds, then an embed with no text and no components.
+	send "Both" with embeds {_one} and {_two} with components {_ok} to {_ch} and store it in {_m}
+	mark fake view of {_m}
+	edit message {_m} to "No embeds now" with no embeds and store it in {_m}
+	mark fake view of {_m}
+	mark "after the edit: %text of {_m}%, embeds left: %size of embeds of {_m}%"
+	edit message {_m} to embed {_two} with no components
+	mark fake view of {_m}
+
+	# Colours: a hex, and something that isn't a colour (a warning, and the colour stays), then none.
+	set colour of {_two} to "#ff8800"
+	mark "hex colour: %colour of {_two}%"
+	set colour of {_two} to "not a colour"
+	mark "colour kept: %colour of {_two}%"
+	delete colour of {_two}
+	if colour of {_two} is not set:
+		mark "colour removed"
+
+	# Discord's limits. Each message is left out whole: nothing is stored, and the error says which limit.
+	set {_crowd} to an embed titled "Crowded"
+	loop 26 times:
+		add field "F%loop-number%" with value "v" to {_crowd}
+	send "Too many fields" with embed {_crowd} to {_ch} and store it in {_none}
+	mark "fields: %error type of last discord error%: %last discord error%"
+	set {_text} to "xxxxxxxx"
+	loop 9 times:
+		set {_text} to "%{_text}%%{_text}%"
+	set {_long} to an embed titled "Long"
+	set description of {_long} to "%{_text}%x"
+	send "Too long" with embed {_long} to {_ch} and store it in {_none}
+	mark "description: %last discord error%"
+	set {_big} to an embed titled "Big"
+	set description of {_big} to {_text}
+	send "Too much in total" with embeds {_big} and {_big} to {_ch} and store it in {_none}
+	mark "total: %last discord error%"
+	loop 11 times:
+		add an embed titled "E%loop-number%" to {_eleven::*}
+	send "Eleven" with embeds {_eleven::*} to {_ch} and store it in {_none}
+	mark "count: %last discord error%"
+	send "Empty" with embed a new embed to {_ch} and store it in {_none}
+	mark "empty: %last discord error%"
+	set {_badlink} to an embed titled "Bad link"
+	set image of {_badlink} to "ftp://example.com/x.png"
+	send "Bad link" with embed {_badlink} to {_ch} and store it in {_none}
+	mark "link: %last discord error%"
+	if {_none} is not set:
+		mark "none of them was sent"
+
+	# Interactions: a reply with an embed and a button, a follow-up with only an embed, a click answered by editing
+	# its message to an embed and then removing it, and an edit refused for a broken limit.
+	fire button click "embeds:reply"
+	wait 200 milliseconds
+	fire button click "embeds:update"
+	wait 200 milliseconds
+	fire button click "embeds:clear"
+	wait 200 milliseconds
+	fire button click "embeds:toolong"
+	wait 200 milliseconds
+
+on button click "embeds:reply":
+	set {_e} to an embed titled "Reply"
+	set colour of {_e} to "red"
+	reply ephemerally with "Here:" with embed {_e} with components a primary button with id "embeds:more" labeled "More"
+	reply with embed {_e}
+
+on button click "embeds:update":
+	set {_e} to an embed titled "New page"
+	add field "Name" with value "Value" to {_e}
+	edit the message to "Updated" with components a primary button with id "embeds:next" labeled "Next" with embed {_e}
+
+on button click "embeds:clear":
+	edit the message to "Cleared" with no embeds
+
+on button click "embeds:toolong":
+	set {_e} to an embed titled "Long"
+	set {_text} to "xxxxxxxx"
+	loop 9 times:
+		set {_text} to "%{_text}%%{_text}%"
+	set description of {_e} to "%{_text}%x"
+	edit the message to "Never" with embed {_e}
+	mark "click refused: %last discord error%"
+	reply ephemerally with "That page was too long"

@@ -13,6 +13,10 @@ import java.util.function.Consumer;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import io.github.itsnotethann.skord.discord.Embeds;
+import io.github.itsnotethann.skord.discord.MessageBody;
+import io.github.itsnotethann.skord.discord.MessageComponent;
+import io.github.itsnotethann.skord.discord.Components;
 import io.github.itsnotethann.skord.discord.CategoryRef;
 import io.github.itsnotethann.skord.discord.ChannelRef;
 import io.github.itsnotethann.skord.discord.Discord;
@@ -229,6 +233,17 @@ public final class RemoteDiscord implements Discord, DiscordActions, DiscordEven
 	}
 
 	@Override
+	public CompletionStage<MessageRef> send(ChannelRef channel, String text, List<? extends MessageComponent> components) {
+		if (components.isEmpty())
+			return send(channel, text);
+		JsonObject args = new JsonObject();
+		args.add("channel", RefCodec.toJson(channel));
+		args.addProperty("text", text);
+		args.add("components", Components.toJson(components));
+		return action("send", args).thenApply(result -> new MessageRef(id(result), channel.id(), text, text));
+	}
+
+	@Override
 	public CompletionStage<MessageRef> reply(MessageRef message, String text) {
 		JsonObject args = new JsonObject();
 		args.add("message", RefCodec.toJson(message));
@@ -242,6 +257,76 @@ public final class RemoteDiscord implements Discord, DiscordActions, DiscordEven
 		args.add("message", RefCodec.toJson(message));
 		args.addProperty("text", text);
 		return action("edit", args).thenApply(result -> new MessageRef(message.id(), message.channel(), text, text));
+	}
+
+	/** Text, and embeds, components and mentions when the body sets them: absent fields leave a message's as they are. */
+	private static void put(JsonObject args, MessageBody body) {
+		args.addProperty("text", body.text());
+		if (body.components() != null)
+			args.add("components", Components.toJson(body.components()));
+		if (body.embeds() != null)
+			args.add("embeds", Embeds.toJson(body.embeds()));
+		if (body.mentions())
+			args.addProperty("mentions", true);
+	}
+
+	private static <T> CompletionStage<T> invalid(String problem) {
+		return CompletableFuture.failedFuture(new DiscordException(
+			new DiscordError(DiscordError.Type.INVALID_INPUT, problem, null, 0)));
+	}
+
+	@Override
+	public CompletionStage<MessageRef> send(ChannelRef channel, MessageBody body) {
+		String problem = body.problem();
+		if (problem != null)
+			return invalid(problem);
+		JsonObject args = new JsonObject();
+		args.add("channel", RefCodec.toJson(channel));
+		put(args, body);
+		return action("send", args).thenApply(result -> new MessageRef(id(result), channel.id(), body.text(), body.text(),
+			self(), body.embeds()));
+	}
+
+	@Override
+	public CompletionStage<MessageRef> reply(MessageRef message, MessageBody body) {
+		String problem = body.problem();
+		if (problem != null)
+			return invalid(problem);
+		JsonObject args = new JsonObject();
+		args.add("message", RefCodec.toJson(new MessageRef(message.id(), message.channel())));
+		put(args, body);
+		return action("reply", args).thenApply(result -> new MessageRef(id(result), message.channel(), body.text(),
+			body.text(), self(), body.embeds()));
+	}
+
+	@Override
+	public CompletionStage<MessageRef> edit(MessageRef message, MessageBody body) {
+		String problem = body.problem();
+		if (problem != null)
+			return invalid(problem);
+		JsonObject args = new JsonObject();
+		args.add("message", RefCodec.toJson(new MessageRef(message.id(), message.channel())));
+		put(args, body);
+		return action("edit", args).thenApply(result -> message.after(body));
+	}
+
+	@Override
+	public CompletionStage<Void> delete(MessageRef message) {
+		JsonObject args = new JsonObject();
+		args.add("message", RefCodec.toJson(new MessageRef(message.id(), message.channel())));
+		return action("delete", args).thenApply(result -> null);
+	}
+
+	@Override
+	public CompletionStage<MessageRef> fetchMessage(ChannelRef channel, long id) {
+		JsonObject args = new JsonObject();
+		args.add("channel", RefCodec.toJson(channel));
+		args.addProperty("id", Long.toString(id));
+		return action("fetch-message", args).thenApply(result -> {
+			if (RefCodec.fromJson(result.data()) instanceof MessageRef found)
+				return found;
+			throw new DiscordException(new DiscordError(DiscordError.Type.OTHER, "The bot answered without the message", null, 0));
+		});
 	}
 
 	@Override

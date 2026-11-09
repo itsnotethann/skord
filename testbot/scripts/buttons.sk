@@ -1,0 +1,54 @@
+# Buttons: a reply carries them, a click is matched by id or id prefix, and the click is answered by editing the message.
+
+on button click "menu":
+	set {_ok} to a success button with id "verify" labeled "I agree"
+	set {_no} to a danger disabled button with id "shop:no" labeled "Decline"
+	reply with "Read the rules, then click:" with components {_ok} and {_no}
+
+on button click "verify":
+	mark "verify clicked, id %component id%"
+	edit the message to "Verified." with no components
+
+on button click starting with "shop:":
+	mark "shop click, id %component id%"
+	edit the message to "Bought." with components a secondary button with id "shop:again" labeled "Again"
+
+on button click:
+	# embeds.sk, messages.sk and pager.sk fire clicks too; those ids carry their own prefix and are theirs.
+	if component id starts with "embeds:" or "msgs:" or "pager:":
+		stop
+	mark "any click"
+
+on button click "silent":
+	mark "silent handler"
+
+on ready:
+	fire button click "menu"
+	fire button click "verify"
+	fire button click "shop:2"
+	fire button click "silent"
+
+# State in the id: the parts after the prefix.
+on button click starting with "cart:":
+	set {_parts::*} to component id parts
+	mark "cart parts: %{_parts::2}% and %{_parts::3}%"
+
+# A message sent to a channel with buttons, a link button among them, and a wait for a click on it.
+on ready:
+	wait 100 milliseconds
+	set {_channel} to channel with id "111111111111111111"
+	set {_yes} to a primary button with id "wait:yes" labeled "Yes"
+	set {_rules} to a link button to "https://example.com/rules" labeled "Rules"
+	send "Ready?" with components {_yes} and {_rules} to {_channel} and store it in {-buttons.waiting}
+	mark "sent: %last fake message text%"
+	wait for a button click on {-buttons.waiting} by user with id "7" within 3 seconds and store it in {_click}
+	mark "waited click: %{_click}%"
+	wait for a button click on {-buttons.waiting} within 200 milliseconds and store it in {_none}
+	if {_none} is not set:
+		mark "no click in time, nothing stored"
+
+on ready:
+	wait 400 milliseconds
+	fire button click "cart:add:42" on {-buttons.waiting}
+	fire button click "wait:yes" on {-buttons.waiting} as user "8"
+	fire button click "wait:yes" on {-buttons.waiting} as user "7"

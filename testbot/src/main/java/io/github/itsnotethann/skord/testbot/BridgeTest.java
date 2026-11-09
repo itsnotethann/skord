@@ -204,6 +204,17 @@ public final class BridgeTest {
 		check(!config.toString().contains("topsecret"), "BridgeConfig never prints the secret");
 		check(!new Frame.Hello(1, "hub", "skl_topsecret", "test").toString().contains("topsecret"),
 			"Hello never prints the secret");
+		Frame.Hello plain = (Frame.Hello) FrameCodec.decode(FrameCodec.encode(new Frame.Hello(1, "hub", "s", "test")));
+		check(plain.meta().isEmpty() && !FrameCodec.encode(plain).contains("meta"), "a hello without metadata stays as it was");
+		java.util.Map<String, String> many = new java.util.LinkedHashMap<>();
+		for (int i = 0; i < 40; i++)
+			many.put("k" + i, "x".repeat(500));
+		Frame.Hello capped = (Frame.Hello) FrameCodec.decode(FrameCodec.encode(new Frame.Hello(1, "hub", "s", "test", many)));
+		check(capped.meta().size() == FrameCodec.META_MAX_ENTRIES
+			&& capped.meta().values().stream().allMatch(v -> v.length() == FrameCodec.META_MAX_LENGTH),
+			"hello metadata is capped in count and length");
+		check(BridgeConfig.of(java.util.Map.of("url", "ws://h:1", "name", "a", "secret", "s", "meta", java.util.Map.of("region", "eu")))
+			.meta().equals(java.util.Map.of("region", "eu")), "bridge config reads meta");
 	}
 
 	private static void scopes(Path work) throws Exception {
@@ -263,7 +274,8 @@ public final class BridgeTest {
 		BridgeServer server = start(store, events);
 		try {
 			FakePlatform platform = new FakePlatform(work);
-			Bridge bridge = Bridge.start(config(server, "survival", secret), platform);
+			Bridge bridge = Bridge.start(config(server, "survival", secret).withMeta(java.util.Map.of("version", "1.2.3")),
+				platform);
 			CountDownLatch connected = new CountDownLatch(1);
 			bridge.addListener(new Bridge.ConnectionListener() {
 				@Override
@@ -276,6 +288,9 @@ public final class BridgeTest {
 			check(server.isConnected("survival"), "the bot sees the server connected");
 			await(() -> events.seen.contains("connected survival test"), "the bot's listener hears the hello");
 			check(!platform.log.toString().contains(secret), "the secret is never logged");
+			check(server.meta("survival").equals(java.util.Map.of("version", "1.2.3")), "the bot keeps the hello metadata");
+			check(LinkCommands.run(store, server, name -> {}, new String[] {"list"}).stream()
+				.anyMatch(line -> line.trim().equals("version=1.2.3")), "link list shows the metadata");
 			bridge.close();
 			await(() -> events.seen.contains("disconnected survival"), "the bot hears the disconnect");
 			check(!server.isConnected("survival"), "a closed server is no longer connected");

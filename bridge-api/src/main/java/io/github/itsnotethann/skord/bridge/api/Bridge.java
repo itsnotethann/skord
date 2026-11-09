@@ -22,6 +22,8 @@ import java.util.logging.Level;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import io.github.itsnotethann.skord.discord.MessageComponent;
+import io.github.itsnotethann.skord.discord.Components;
 import io.github.itsnotethann.skord.protocol.BridgeClient;
 import io.github.itsnotethann.skord.protocol.CommandSpec;
 import io.github.itsnotethann.skord.protocol.Frame;
@@ -89,6 +91,8 @@ public final class Bridge implements AutoCloseable {
 	private volatile Set<Listen> listen = EnumSet.noneOf(Listen.class);
 	private volatile Map<String, Command> commands = Map.of();
 	private volatile boolean declared;
+	private volatile @Nullable CommandHandler componentHandler;
+	private volatile @Nullable CommandHandler modalHandler;
 	private volatile List<Frame.EventSpec> subscriptions = List.of();
 	private volatile boolean subscribed;
 	private volatile List<Frame.FunctionSpec> functionSpecs = List.of();
@@ -104,7 +108,7 @@ public final class Bridge implements AutoCloseable {
 		this.config = config;
 		URI url = config.url();
 		this.client = new BridgeClient(url,
-			() -> new Frame.Hello(FrameCodec.VERSION, config.name(), config.secret(), platform.name()),
+			() -> new Frame.Hello(FrameCodec.VERSION, config.name(), config.secret(), platform.name(), config.meta()),
 			new Relay());
 	}
 
@@ -142,6 +146,24 @@ public final class Bridge implements AutoCloseable {
 
 	public void removeListener(ConnectionListener listener) {
 		listeners.remove(listener);
+	}
+
+	/**
+	 * Handles clicks on components of messages this server sent (a {@code send} or reply with buttons or select menus). The click
+	 * comes back to whichever process sent the message; {@link CommandContext#component()} is the component's id.
+	 */
+	public void onComponent(@Nullable CommandHandler handler) {
+		this.componentHandler = handler;
+	}
+
+	/**
+	 * Handles submits of modals this server showed ({@link CommandContext#showModal}). The submit comes back to the
+	 * server that showed the modal; {@link CommandContext#modal()} is the modal's id and
+	 * {@link CommandContext#inputs()} the values. With no handler, or one that doesn't answer, the bot acknowledges
+	 * the submit.
+	 */
+	public void onModal(@Nullable CommandHandler handler) {
+		this.modalHandler = handler;
 	}
 
 	/**
@@ -446,9 +468,72 @@ public final class Bridge implements AutoCloseable {
 
 		private CompletionStage<String> respond(Frame.Respond.Action action, @Nullable String text, boolean ephemeral,
 												@Nullable String message) {
+			return respond(action, text, ephemeral, message, null);
+		}
+
+		private CompletionStage<String> respond(Frame.Respond.Action action, @Nullable String text, boolean ephemeral,
+												@Nullable String message, @Nullable List<? extends MessageComponent> components) {
 			String id = UUID.randomUUID().toString();
-			return request(id, new Frame.Respond(id, frame.id(), action, text, ephemeral, message))
+			return request(id, new Frame.Respond(id, frame.id(), action, text, ephemeral, message,
+				components == null ? null : Components.toJson(components)))
 				.thenApply(result -> result.message() == null ? "" : result.message());
+		}
+
+		@Override
+		public @Nullable String component() {
+			return frame.component();
+		}
+
+		@Override
+		public @Nullable String message() {
+			return frame.message();
+		}
+
+		@Override
+		public @Nullable List<String> values() {
+			return frame.values();
+		}
+
+		@Override
+		public @Nullable String modal() {
+			return frame.modal();
+		}
+
+		@Override
+		public @Nullable Map<String, String> inputs() {
+			return frame.inputs();
+		}
+
+		@Override
+		public CompletionStage<Void> showModal(io.github.itsnotethann.skord.discord.Modal modal) {
+			String id = UUID.randomUUID().toString();
+			return request(id, new Frame.Respond(id, frame.id(), Frame.Respond.Action.MODAL, null, false, null, null,
+				io.github.itsnotethann.skord.discord.Modals.toJson(modal))).thenApply(result -> null);
+		}
+
+		@Override
+		public CompletionStage<String> reply(String text, boolean ephemeral, List<? extends MessageComponent> components) {
+			return respond(Frame.Respond.Action.REPLY, text, ephemeral, null, components);
+		}
+
+		@Override
+		public CompletionStage<String> edit(@Nullable String messageId, String text, List<? extends MessageComponent> components) {
+			return respond(Frame.Respond.Action.EDIT, text, false, messageId, components);
+		}
+
+		@Override
+		public CompletionStage<String> followUp(String text, boolean ephemeral, List<? extends MessageComponent> components) {
+			return respond(Frame.Respond.Action.FOLLOW_UP, text, ephemeral, null, components);
+		}
+
+		@Override
+		public CompletionStage<String> update(String text, @Nullable List<? extends MessageComponent> components) {
+			return respond(Frame.Respond.Action.UPDATE, text, false, null, components);
+		}
+
+		@Override
+		public CompletionStage<Void> deferUpdate() {
+			return respond(Frame.Respond.Action.DEFER_UPDATE, null, false, null).thenApply(result -> null);
 		}
 
 		@Override
@@ -474,6 +559,36 @@ public final class Bridge implements AutoCloseable {
 		@Override
 		public CompletionStage<Void> deleteOriginal() {
 			return respond(Frame.Respond.Action.DELETE, null, false, null).thenApply(result -> null);
+		}
+
+		private CompletionStage<String> respondBody(Frame.Respond.Action action, io.github.itsnotethann.skord.discord.MessageBody body,
+												boolean ephemeral, @Nullable String message) {
+			String id = UUID.randomUUID().toString();
+			return request(id, new Frame.Respond(id, frame.id(), action, body.text(), ephemeral, message,
+				body.components() == null ? null : Components.toJson(body.components()), null,
+				body.embeds() == null ? null : io.github.itsnotethann.skord.discord.Embeds.toJson(body.embeds()),
+				body.mentions()))
+				.thenApply(result -> result.message() == null ? "" : result.message());
+		}
+
+		@Override
+		public CompletionStage<String> reply(io.github.itsnotethann.skord.discord.MessageBody body, boolean ephemeral) {
+			return respondBody(Frame.Respond.Action.REPLY, body, ephemeral, null);
+		}
+
+		@Override
+		public CompletionStage<String> edit(@Nullable String messageId, io.github.itsnotethann.skord.discord.MessageBody body) {
+			return respondBody(Frame.Respond.Action.EDIT, body, false, messageId);
+		}
+
+		@Override
+		public CompletionStage<String> followUp(io.github.itsnotethann.skord.discord.MessageBody body, boolean ephemeral) {
+			return respondBody(Frame.Respond.Action.FOLLOW_UP, body, ephemeral, null);
+		}
+
+		@Override
+		public CompletionStage<String> update(io.github.itsnotethann.skord.discord.MessageBody body) {
+			return respondBody(Frame.Respond.Action.UPDATE, body, false, null);
 		}
 	}
 
@@ -502,6 +617,14 @@ public final class Bridge implements AutoCloseable {
 	}
 
 	private void interaction(Frame.Interaction frame) {
+		if (frame.isComponent()) {
+			component(frame);
+			return;
+		}
+		if (frame.isModalSubmit()) {
+			handleQuietly(frame, modalHandler, "modal '" + frame.modal() + "'");
+			return;
+		}
 		Command command = commands.get(frame.command());
 		if (command == null) {
 			String id = UUID.randomUUID().toString();
@@ -519,6 +642,33 @@ public final class Bridge implements AutoCloseable {
 			} catch (RuntimeException e) {
 				platform.log(Level.SEVERE, "Bridge: command /" + frame.command() + " failed: " + e);
 				context.reply("Something went wrong running that command.", true);
+			}
+			client.send(new Frame.Dispatched(frame.id(), paused));
+		});
+	}
+
+	/**
+	 * A click on a component of a message this server sent. With no handler, or one that doesn't answer, the bot
+	 * acknowledges the click without changing the message.
+	 */
+	private void component(Frame.Interaction frame) {
+		handleQuietly(frame, componentHandler, "component '" + frame.component() + "'");
+	}
+
+	/** Runs a click's or submit's handler; one that doesn't answer leaves the bot to acknowledge it silently. */
+	private void handleQuietly(Frame.Interaction frame, @Nullable CommandHandler handler, String what) {
+		if (handler == null) {
+			client.send(new Frame.Dispatched(frame.id(), false));
+			return;
+		}
+		Context context = new Context(frame, Map.of());
+		platform.runOnMain(() -> {
+			boolean paused = false;
+			try {
+				CompletionStage<?> later = handler.handle(context);
+				paused = later != null && !later.toCompletableFuture().isDone();
+			} catch (RuntimeException e) {
+				platform.log(Level.SEVERE, "Bridge: " + what + " failed: " + e);
 			}
 			client.send(new Frame.Dispatched(frame.id(), paused));
 		});

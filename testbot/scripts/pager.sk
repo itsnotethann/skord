@@ -1,0 +1,40 @@
+# Phase 4's exit case: a paged embed as a plain script. Buttons page the embed by editing the message they are on,
+# and the page lives in the button's id ("pager:2"), so no variable holds any state and the pager survives a restart.
+# Clicks here start with "pager:", which buttons.sk's catch-all leaves alone; it waits until the other scripts'
+# timing-sensitive steps are over.
+
+function pagerPage(n: number) :: embed:
+	set {_fruit::*} to "Apple", "Banana" and "Cherry"
+	set {_e} to an embed titled "Fruit"
+	set description of {_e} to "%{_fruit::%{_n}%}% is fruit number %{_n}%."
+	set footer of {_e} to "Page %{_n}% of 3"
+	set colour of {_e} to "green"
+	return {_e}
+
+function pagerButtons(n: number) :: components:
+	if {_n} is 1:
+		set {_previous} to a secondary disabled button with id "pager:0" labeled "Previous"
+	else:
+		set {_previous} to a secondary button with id "pager:%{_n} - 1%" labeled "Previous"
+	if {_n} is 3:
+		set {_next} to a secondary disabled button with id "pager:4" labeled "Next"
+	else:
+		set {_next} to a secondary button with id "pager:%{_n} + 1%" labeled "Next"
+	return {_previous} and {_next}
+
+on ready:
+	wait 3 seconds
+	send embed pagerPage(1) with components pagerButtons(1) to channel with id "111111111111111111" and store it in {_pager}
+	mark fake view of {_pager}
+	fire button click "pager:2" on {_pager}
+	wait 200 milliseconds
+	fire button click "pager:3" on {_pager}
+	wait 200 milliseconds
+	fire button click "pager:2" on {_pager}
+	wait 200 milliseconds
+
+on button click starting with "pager:":
+	set {_parts::*} to component id parts
+	set {_n} to {_parts::2} parsed as number
+	mark "page %{_n}%"
+	edit the message to embed pagerPage({_n}) with components pagerButtons({_n})

@@ -25,7 +25,11 @@ import io.github.itsnotethann.skord.event.ServerDisconnectEvent;
 import io.github.itsnotethann.skord.shared.SharedFunctions;
 import io.github.itsnotethann.skord.command.CommandRegistry;
 import io.github.itsnotethann.skord.command.CommandSync;
+import io.github.itsnotethann.skord.event.ComponentEvent;
+import io.github.itsnotethann.skord.event.SelectEvent;
 import io.github.itsnotethann.skord.event.SlashEvent;
+import io.github.itsnotethann.skord.discord.MessageComponent;
+import io.github.itsnotethann.skord.discord.Components;
 import io.github.itsnotethann.skord.interaction.Interaction;
 import io.github.itsnotethann.skord.protocol.CommandSpec;
 import io.github.itsnotethann.skord.protocol.Frame;
@@ -66,17 +70,26 @@ public final class BridgeRouter implements BridgeServer.Listener {
 	private static final class Pending {
 		final String server;
 		final Interaction interaction;
+		// The Discord user the interaction is from, or "0": a modal the server shows is routed by user and modal id.
+		final String user;
 		boolean dispatched;
 
-		Pending(String server, Interaction interaction) {
+		Pending(String server, Interaction interaction, String user) {
 			this.server = server;
 			this.interaction = interaction;
+			this.user = user;
 		}
 	}
 
 	public static final String LINKED_PLAYER = "linkedPlayer";
+	public static final String LINKS_PAGE = "linksPage";
 
 	private static final long LINK_REFRESH_MILLIS = 1_000;
+	static final int LINKS_PAGE_LIMIT = 10_000;
+	static final long LINKS_RESYNC_GAP_MILLIS = 60_000;
+
+	private final java.util.concurrent.atomic.AtomicBoolean resyncing = new java.util.concurrent.atomic.AtomicBoolean();
+	private volatile long lastResync;
 
 	private static volatile @Nullable BridgeRouter current;
 
@@ -103,6 +116,12 @@ public final class BridgeRouter implements BridgeServer.Listener {
 	private final BridgeCalls calls;
 	private final LinkStore links;
 	private final ComponentRoutes components;
+	// "user:modal id" -> the server that showed that user the modal, until its submit or Discord's 15 minutes run out.
+	private final Map<String, ModalRoute> modals = new ConcurrentHashMap<>();
+
+	private record ModalRoute(String server, long expires) {}
+
+	static final int MODAL_CAP = 4096;
 	private final Map<String, List<DiscordEvents.Subscription>> subscriptions = new ConcurrentHashMap<>();
 	private final Map<String, java.util.concurrent.atomic.AtomicInteger> forwarded = new ConcurrentHashMap<>();
 	private final Map<String, java.util.concurrent.atomic.AtomicInteger> refused = new ConcurrentHashMap<>();
@@ -175,12 +194,27 @@ public final class BridgeRouter implements BridgeServer.Listener {
 	}
 
 	/** The router a slash command for a server-owned command goes through, if the bridge is running. */
-	public static final JdaEventBus.Forwarder FORWARDER = (owners, slash, delayed) -> {
-		BridgeRouter router = current();
-		if (router == null)
-			return false;
-		router.forward(owners, slash, delayed);
-		return true;
+	public static final JdaEventBus.Forwarder FORWARDER = new JdaEventBus.Forwarder() {
+		@Override
+		public boolean forward(List<String> owners, SlashEvent slash, boolean delayed) {
+			BridgeRouter router = current();
+			if (router == null)
+				return false;
+			router.forward(owners, slash, delayed);
+			return true;
+		}
+
+		@Override
+		public boolean forwardComponent(ComponentEvent click, boolean delayed) {
+			BridgeRouter router = current();
+			return router != null && router.forwardComponent(click, delayed);
+		}
+
+		@Override
+		public boolean forwardModal(io.github.itsnotethann.skord.event.ModalEvent submit, boolean delayed) {
+			BridgeRouter router = current();
+			return router != null && router.forwardModal(submit, delayed);
+		}
 	};
 
 	public static @Nullable BridgeRouter current() {
@@ -341,7 +375,10 @@ public final class BridgeRouter implements BridgeServer.Listener {
 				case Frame.Respond respond -> respond(name, respond);
 				case Frame.Dispatched dispatched -> dispatched(name, dispatched);
 				case Frame.Call call -> calls.incoming(name, call);
-				case Frame.Functions functions -> calls.declared(name, functions);
+				case Frame.Functions functions -> {
+					calls.declared(name, functions);
+					resyncLinks(name, functions);
+				}
 				case Frame.CallResult result -> calls.result(name, result);
 				case Frame.Players update -> players(name, update);
 				case Frame.Action action -> action(name, action);
@@ -377,9 +414,25 @@ public final class BridgeRouter implements BridgeServer.Listener {
 		}
 		stage.whenComplete((result, error) -> {
 			Frame.Result answer = error != null ? BridgeActions.failure(frame.id(), error) : result;
-			if (error == null && result.ok() && result.message() != null && frame.args().has("components")
-				&& (frame.kind().equals("send") || frame.kind().equals("reply")))
-				components.record(result.message(), name);
+			// A message the server puts components on, by sending, replying or editing, sends its clicks back to that
+			// server. An edit without components keeps whatever route the message had; a deleted message has none.
+			if (error == null && result.ok() && result.message() != null) {
+				JsonElement sentComponents = frame.args().get("components");
+				boolean withComponents = sentComponents != null && sentComponents.isJsonArray()
+					&& !sentComponents.getAsJsonArray().isEmpty();
+				switch (frame.kind()) {
+					case "send", "reply" -> {
+						if (frame.args().has("components"))
+							components.record(result.message(), name);
+					}
+					case "edit" -> {
+						if (withComponents)
+							components.record(result.message(), name);
+					}
+					case "delete" -> components.forgetMessage(result.message());
+					default -> {}
+				}
+			}
 			live.send(name, answer);
 		});
 	}
@@ -447,8 +500,11 @@ public final class BridgeRouter implements BridgeServer.Listener {
 					wire.kind(), needed.wire);
 				continue;
 			}
-			// Ready is local to each process, and slash commands arrive as interactions: nothing to forward.
-			if (kind == EventSpec.Kind.READY || kind == EventSpec.Kind.SLASH_COMMAND)
+			// Ready is local to each process, and slash commands and clicks arrive as interactions (a click only on
+			// a message the server sent): nothing to forward.
+			if (kind == EventSpec.Kind.READY || kind == EventSpec.Kind.SLASH_COMMAND
+				|| kind == EventSpec.Kind.BUTTON_CLICK || kind == EventSpec.Kind.SELECT_MENU
+				|| kind == EventSpec.Kind.MODAL_SUBMIT)
 				continue;
 			if (wire.held()) {
 				if (!HeldKinds.heldable(kind)) {
@@ -584,6 +640,49 @@ public final class BridgeRouter implements BridgeServer.Listener {
 			: refreshLink(discordId, owners, index + 1));
 	}
 
+	private void resyncLinks(String name, Frame.Functions functions) {
+		if (functions.functions().stream().noneMatch(spec -> spec.name().equals(LINKS_PAGE)))
+			return;
+		if (System.currentTimeMillis() - lastResync < LINKS_RESYNC_GAP_MILLIS || !resyncing.compareAndSet(false, true))
+			return;
+		linksPage(name, "", new java.util.LinkedHashMap<>(), 0);
+	}
+
+	private void linksPage(String name, String after, Map<String, String> collected, int pages) {
+		JsonArray args = new JsonArray();
+		args.add(after);
+		calls.ask(name, LINKS_PAGE, args, timeoutMillis).whenComplete((answer, error) -> script.execute(() -> {
+			String problem = null;
+			String last = after;
+			if (error != null || answer != null && !answer.isJsonNull() && !answer.isJsonArray()) {
+				problem = error != null ? error.getMessage() : "the answer was not a list";
+			} else if (answer == null || answer.isJsonNull() || answer.getAsJsonArray().isEmpty()) {
+				playerLinks.replaceAll(collected);
+				lastResync = System.currentTimeMillis();
+				resyncing.set(false);
+				LOGGER.info("Bridge: rebuilt the player link cache from '{}' ({} link(s))", name, collected.size());
+				return;
+			} else if (answer.getAsJsonArray().size() % 2 != 0) {
+				problem = "a page had an odd number of values";
+			} else if (pages + 1 >= LINKS_PAGE_LIMIT) {
+				problem = "more than " + LINKS_PAGE_LIMIT + " pages";
+			} else {
+				JsonArray page = answer.getAsJsonArray();
+				for (int i = 0; i < page.size(); i += 2)
+					collected.put(page.get(i).getAsString(), page.get(i + 1).getAsString());
+				last = page.get(page.size() - 2).getAsString();
+				if (last.equals(after))
+					problem = "pages did not move forward";
+			}
+			if (problem != null) {
+				resyncing.set(false);
+				LOGGER.warn("Bridge: player link resync from '{}' stopped, keeping the cache as it was: {}", name, problem);
+				return;
+			}
+			linksPage(name, last, collected, pages + 1);
+		}));
+	}
+
 	private void forwardRouted(List<String> owners, SlashEvent slash, boolean locallyPaused, @Nullable String discordId) {
 		String chosen = route(owners, discordId);
 		if (chosen != null) {
@@ -601,7 +700,62 @@ public final class BridgeRouter implements BridgeServer.Listener {
 	 * {@code on slash command} handler paused; the interaction is only judged finished once both sides are done.
 	 */
 	public void forward(String owner, SlashEvent slash, boolean locallyPaused) {
-		Interaction interaction = slash.interaction();
+		JsonObject options = new JsonObject();
+		slash.options().forEach((key, value) -> put(options, key, value));
+		send(owner, slash.interaction(), locallyPaused, id -> new Frame.Interaction(id, slash.command(), options,
+			ref(slash.user()), ref(slash.member()), ref(slash.guild()), ref(slash.channel())));
+	}
+
+	/**
+	 * Sends a click or a selection to the server that sent the message it is on (a selection carries its values). False when no server sent that message (or the
+	 * click has none), so the bot's own handlers settle it. Bot handlers for the click have already run.
+	 */
+	public boolean forwardComponent(ComponentEvent click, boolean locallyPaused) {
+		MessageRef message = click.message();
+		if (message == null)
+			return false;
+		String owner = componentOwner(Long.toString(message.id()));
+		if (owner == null)
+			return false;
+		send(owner, click.interaction(), locallyPaused, id -> new Frame.Interaction(id, "", new JsonObject(),
+			ref(click.user()), ref(click.member()), ref(click.guild()), ref(click.channel()), click.id(),
+			Long.toString(message.id()), click instanceof SelectEvent select ? select.values() : null));
+		return true;
+	}
+
+	private void routeModal(String user, String modal, String server) {
+		long now = System.currentTimeMillis();
+		if (modals.size() >= MODAL_CAP)
+			modals.values().removeIf(route -> route.expires() < now);
+		if (modals.size() >= MODAL_CAP)
+			modals.clear();
+		modals.put(user + ":" + modal, new ModalRoute(server, now + LIFETIME_MILLIS));
+	}
+
+	/**
+	 * Sends a modal submit to the server that showed that user that modal, with the inputs. False when no server did
+	 * (or the route expired), so the bot's own handlers settle it. Bot handlers for the submit have already run. A
+	 * route is used once: a modal shown once is submitted once.
+	 */
+	public boolean forwardModal(io.github.itsnotethann.skord.event.ModalEvent submit, boolean locallyPaused) {
+		String user = submit.user() == null ? "0" : Long.toString(submit.user().id());
+		ModalRoute route = modals.remove(user + ":" + submit.id());
+		if (route == null || route.expires() < System.currentTimeMillis())
+			return false;
+		MessageRef message = submit.message();
+		send(route.server(), submit.interaction(), locallyPaused, id -> new Frame.Interaction(id, "", new JsonObject(),
+			ref(submit.user()), ref(submit.member()), ref(submit.guild()), ref(submit.channel()), null,
+			message == null ? null : Long.toString(message.id()), null, submit.id(), submit.inputs()));
+		return true;
+	}
+
+	/** How many modal routes are held; for tests. */
+	public int modalRoutes() {
+		return modals.size();
+	}
+
+	private void send(String owner, Interaction interaction, boolean locallyPaused,
+					  java.util.function.Function<String, Frame.Interaction> frame) {
 		BridgeServer live = server;
 		if (live == null || !live.isConnected(owner)) {
 			interaction.reply("The server '" + owner + "' is offline right now.", true, false);
@@ -609,12 +763,10 @@ public final class BridgeRouter implements BridgeServer.Listener {
 			return;
 		}
 		String id = UUID.randomUUID().toString();
-		Pending entry = new Pending(owner, interaction);
+		Frame.Interaction built = frame.apply(id);
+		Pending entry = new Pending(owner, interaction, built.user() == null ? "0" : built.user().id());
 		pending.put(id, entry);
-		JsonObject options = new JsonObject();
-		slash.options().forEach((key, value) -> put(options, key, value));
-		boolean sent = live.send(owner, new Frame.Interaction(id, slash.command(), options, ref(slash.user()),
-			ref(slash.member()), ref(slash.guild()), ref(slash.channel())));
+		boolean sent = live.send(owner, built);
 		if (!sent) {
 			pending.remove(id);
 			interaction.reply("The server '" + owner + "' is offline right now.", true, false);
@@ -652,15 +804,30 @@ public final class BridgeRouter implements BridgeServer.Listener {
 		}
 		Interaction interaction = entry.interaction;
 		String text = frame.text() == null ? "" : frame.text();
+		List<MessageComponent> parsed = Components.fromJson(frame.components());
+		io.github.itsnotethann.skord.discord.MessageBody body = new io.github.itsnotethann.skord.discord.MessageBody(text,
+			io.github.itsnotethann.skord.discord.Embeds.fromJson(frame.embeds()), parsed, frame.mentions());
 		java.util.concurrent.CompletionStage<?> request;
 		try {
 			request = switch (frame.action()) {
-				case REPLY, FOLLOW_UP -> interaction.reply(text, frame.ephemeral(), true);
+				case REPLY, FOLLOW_UP -> interaction.reply(body, frame.ephemeral(), true);
 				case DEFER -> interaction.defer(frame.ephemeral());
 				case DELETE -> interaction.deleteOriginal();
 				case EDIT -> frame.message() == null
-					? interaction.editOriginal(text)
-					: interaction.editMessage(frame.message(), text);
+					? interaction.editOriginal(body)
+					: interaction.editMessage(frame.message(), body);
+				case UPDATE -> interaction.update(body);
+				case DEFER_UPDATE -> interaction.deferUpdateNow();
+				case MODAL -> {
+					io.github.itsnotethann.skord.discord.Modal modal =
+						io.github.itsnotethann.skord.discord.Modals.fromJson(frame.modal());
+					if (modal == null)
+						throw new IllegalArgumentException("The modal is missing or malformed");
+					yield interaction.showModal(modal).thenApply(shown -> {
+						routeModal(entry.user, modal.id(), name);
+						return null;
+					});
+				}
 			};
 		} catch (RuntimeException e) {
 			request = java.util.concurrent.CompletableFuture.failedFuture(e);
@@ -672,6 +839,9 @@ public final class BridgeRouter implements BridgeServer.Listener {
 				answer = new Frame.Result(frame.id(), false, null, new Frame.Result.Failure(
 					failure.type().label(), failure.message(), failure.code()));
 			} else {
+				// A message the server put components on sends its clicks and selections back to that server.
+				if (result instanceof MessageRef message && parsed != null && !parsed.isEmpty())
+					components.record(Long.toString(message.id()), name);
 				answer = new Frame.Result(frame.id(), true,
 					result instanceof MessageRef message ? Long.toString(message.id()) : null, null);
 			}

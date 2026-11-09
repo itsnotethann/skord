@@ -1,0 +1,18 @@
+reply: Choose: [select role "Pick roles" 0-2 {red:Red (The red team)*, <:blue:123> blue:Blue, green:Green}, success roles:done:Done]
+any selection, id open
+role picked 2: red and blue
+update: Roles: red and blue [no components]
+any selection, id role
+shop hats picked cap
+update: Bought. [select shop:closed "Sold out" 1-1 {none:None} (disabled)]
+any selection, id shop:hats
+any selection, id silent
+silent handler
+defer update
+sent: Pick: [select wait:pick 1-2 {a:A, b:B}]
+any selection, id wait:pick
+defer update
+any selection, id wait:pick
+defer update
+waited values: a and b
+no selection in time, nothing stored

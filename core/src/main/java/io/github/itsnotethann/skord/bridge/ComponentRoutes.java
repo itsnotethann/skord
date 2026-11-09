@@ -81,6 +81,12 @@ final class ComponentRoutes {
 		return routes.get(messageId);
 	}
 
+	/** Drops a deleted message's route. */
+	synchronized void forgetMessage(String messageId) {
+		if (routes.remove(messageId) != null)
+			save();
+	}
+
 	synchronized int size() {
 		return routes.size();
 	}

@@ -1,0 +1,85 @@
+# A click goes to the process that sent the message. The server's scripts are server-components/components.sk.
+# Bot handlers for a click run as well (both fire), so every click here also marks "bot saw".
+
+on button click:
+	mark "bot saw %component id%"
+
+on select menu:
+	mark "bot saw selection %component id%: %selected values%"
+
+on ready:
+	start server process "comp" allowing "send,reply,edit,delete,read"
+	wait 1500 milliseconds
+	mark "server sent: %last fake message text%"
+	set {_sent} to last fake message
+
+	# A click on the server's message: the server's handler answers it by editing the message.
+	fire button click "pick:2" on {_sent}
+	wait 1200 milliseconds
+
+	# A click the server has no handler for: acknowledged without changing the message.
+	fire button click "ignored" on {_sent}
+	wait 1200 milliseconds
+
+	# A click on a message no server sent stays on the bot.
+	fire button click "pick:9"
+	wait 600 milliseconds
+
+	# A server's slash reply with buttons sends its clicks to the server too, where a trigger waits for one.
+	fire slash command "menu"
+	wait 1200 milliseconds
+	set {_menu} to last fake message
+	fire button click "menu:open" on {_menu}
+	wait 1200 milliseconds
+
+	# A server's message with a select menu: the selection goes to the server with its values, where a handler
+	# edits the message and the command that sent it was waiting for the values.
+	fire slash command "colors"
+	wait 1500 milliseconds
+	mark "server sent: %last fake message text%"
+	set {_colours} to last fake message
+	fire select menu "color" with values "red" and "blue" on {_colours}
+	wait 1500 milliseconds
+
+	# Modals. A bot button opens one, and its submit edits the button's message, which no server sent.
+	set {_btn} to a primary button with id "rename:open" labeled "Rename"
+	send "Rename me" with components {_btn} to channel with id "111111111111111111" and store it in {_own}
+	fire button click "rename:open" on {_own}
+	wait 600 milliseconds
+	fire modal submit "rename" with inputs "name=New name" on {_own}
+	wait 600 milliseconds
+
+	# A server's slash command shows a modal; the submit goes back to that server, which answers it.
+	fire slash command "feedback" as user "7"
+	wait 1200 milliseconds
+	fire modal submit "feedback" with inputs "text=Great server" and "rating=5" as user "7"
+	wait 1500 milliseconds
+
+	# A server's paged embed: the server sends it with page buttons, edits it once through an action, and pages it
+	# itself as the clicks come back to it.
+	fire slash command "pages"
+	wait 1500 milliseconds
+	mark "server sent: %last fake message text%"
+	set {_pages} to last fake message
+	mark fake view of {_pages}
+	fire button click "spage:2" on {_pages}
+	wait 1200 milliseconds
+	fire button click "spage:3" on {_pages}
+	wait 1200 milliseconds
+
+	# A server edits, fetches and deletes a message by id. Its first message allowed mentions.
+	fire slash command "msgops"
+	wait 2500 milliseconds
+	set {_hi} to last fake message
+	mark fake view of {_hi}
+
+on modal submit:
+	mark "bot saw submit %component id%"
+
+on button click "rename:open":
+	set {_modal} to a modal with id "rename" titled "Rename"
+	add text input with id "name" labeled "New name" with value "Old name" to {_modal}
+	show {_modal}
+
+on modal submit "rename":
+	edit the message to "Renamed to %input "name"%" with no components

@@ -103,6 +103,9 @@ public final class LinkCommands {
 						String state = server == null ? "bridge off" : server.isConnected(link.name()) ? "connected" : "offline";
 						out.add("  " + link.name() + "  (" + state + ", created " + link.created() + ")  scope: "
 							+ show(link.scope()) + "; listen: " + showListen(link.listen()));
+						java.util.Map<String, String> meta = server == null ? java.util.Map.of() : server.meta(link.name());
+						if (!meta.isEmpty())
+							out.add("    " + BridgeServer.showMeta(meta));
 					}
 				}
 				default -> out.add(USAGE);

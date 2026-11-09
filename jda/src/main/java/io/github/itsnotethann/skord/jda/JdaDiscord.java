@@ -22,6 +22,7 @@ import io.github.itsnotethann.skord.discord.EventSpec;
 import io.github.itsnotethann.skord.discord.FetchProperty;
 import io.github.itsnotethann.skord.discord.GuildRef;
 import io.github.itsnotethann.skord.discord.MemberRef;
+import io.github.itsnotethann.skord.discord.MessageBody;
 import io.github.itsnotethann.skord.discord.MessageRef;
 import io.github.itsnotethann.skord.discord.RoleRef;
 import io.github.itsnotethann.skord.discord.UserRef;
@@ -133,29 +134,70 @@ public final class JdaDiscord implements Discord, DiscordActions, DiscordEvents 
 
 	@Override
 	public CompletionStage<MessageRef> send(ChannelRef channel, String text) {
+		return send(channel, MessageBody.of(text));
+	}
+
+	@Override
+	public CompletionStage<MessageRef> send(ChannelRef channel, String text,
+			java.util.List<? extends io.github.itsnotethann.skord.discord.MessageComponent> components) {
+		return send(channel, MessageBody.of(text, components));
+	}
+
+	@Override
+	public CompletionStage<MessageRef> send(ChannelRef channel, MessageBody body) {
 		MessageChannel found = jda().getChannelById(MessageChannel.class, channel.id());
 		if (found == null)
 			return unknownChannel();
-		return found.sendMessage(text).submit().thenApply(JdaRefs::message);
+		return found.sendMessage(JdaMessages.create(body.checked())).submit().thenApply(JdaRefs::message);
 	}
 
 	@Override
 	public CompletionStage<MessageRef> reply(MessageRef message, String text) {
+		return reply(message, MessageBody.of(text));
+	}
+
+	@Override
+	public CompletionStage<MessageRef> reply(MessageRef message, MessageBody body) {
 		MessageChannel found = jda().getChannelById(MessageChannel.class, message.channel());
 		if (found == null)
 			return unknownChannel();
-		return found.sendMessage(text).setMessageReference(message.id()).submit().thenApply(JdaRefs::message);
+		return found.sendMessage(JdaMessages.create(body.checked())).setMessageReference(message.id()).submit()
+			.thenApply(JdaRefs::message);
 	}
 
 	@Override
 	public CompletionStage<MessageRef> edit(MessageRef message, String text) {
+		return edit(message, MessageBody.of(text));
+	}
+
+	@Override
+	public CompletionStage<MessageRef> edit(MessageRef message, MessageBody body) {
 		InteractionHook hook = JdaResponder.hookFor(message.id());
 		if (hook != null)
-			return hook.editMessageById(message.id(), text).submit().thenApply(JdaRefs::message);
+			return hook.editMessageById(message.id(), JdaMessages.edit(body.checked())).submit().thenApply(JdaRefs::message);
 		MessageChannel found = jda().getChannelById(MessageChannel.class, message.channel());
 		if (found == null)
 			return unknownChannel();
-		return found.editMessageById(message.id(), text).submit().thenApply(JdaRefs::message);
+		return found.editMessageById(message.id(), JdaMessages.edit(body.checked())).submit().thenApply(JdaRefs::message);
+	}
+
+	@Override
+	public CompletionStage<Void> delete(MessageRef message) {
+		InteractionHook hook = JdaResponder.hookFor(message.id());
+		if (hook != null)
+			return hook.deleteMessageById(message.id()).submit();
+		MessageChannel found = jda().getChannelById(MessageChannel.class, message.channel());
+		if (found == null)
+			return unknownChannel();
+		return found.deleteMessageById(message.id()).submit();
+	}
+
+	@Override
+	public CompletionStage<MessageRef> fetchMessage(ChannelRef channel, long id) {
+		MessageChannel found = jda().getChannelById(MessageChannel.class, channel.id());
+		if (found == null)
+			return unknownChannel();
+		return found.retrieveMessageById(id).submit().thenApply(JdaRefs::message);
 	}
 
 	@Override

@@ -1,0 +1,16 @@
+send: Hello <@7> mentions off
+send: Hello again <@7> mentions on
+reply: Replying to <@7> mentions off
+reply: Replying to <@7> again mentions on
+text: Hello <@7>, author: 999999999999999999, channel: 111111111111111111
+edit: Edited mentions off
+fetched: Edited
+deleted
+fetch after delete: unknown message (10008)
+delete again: unknown message, tested as a type
+edit after delete: unknown message
+never sent: unknown message
+not an id: invalid input: 'not a number' isn't a message id
+fetched embed: Kept, 1 in all
+reply: Quiet <@7>
+follow-up: Loud <@7> (mentions)

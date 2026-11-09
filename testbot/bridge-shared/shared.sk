@@ -23,6 +23,10 @@ on ready:
 	fire slash command "who" as user "888"
 	wait 300 milliseconds
 
+	# 999 is known only from b's linksPage resync, and its player Cleo is on a.
+	fire slash command "who" as user "999"
+	wait 300 milliseconds
+
 	# Nobody linked: the route order puts b first although a declared the command first.
 	fire slash command "who" as user "777"
 	wait 300 milliseconds

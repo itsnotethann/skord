@@ -1,0 +1,32 @@
+server sent: Pick one [primary pick:1:One, primary pick:2:Two]
+bot saw pick:2
+update: Picked 2 [no components]
+bot saw ignored
+defer update
+bot saw pick:9
+defer update
+reply: Menu [secondary menu:open:Open]
+bot saw menu:open
+reply ephemerally: Opened
+reply ephemerally: Sent the menu
+server sent: Colours [select color "Pick a colour" 1-2 {red:Red, blue:Blue (Calm)}]
+bot saw selection color: red and blue
+update: Colour: red and blue [no components]
+follow-up ephemerally: You picked red and blue
+bot saw rename:open
+modal: rename "Rename" {short name:"New name" required value "Old name"}
+bot saw submit rename
+update: Renamed to New name [no components]
+modal: feedback "Server feedback" {paragraph text:"Your feedback" 0-500 required, short rating:"Rating" 1-2 optional}
+bot saw submit feedback
+reply ephemerally: Thanks for the 5/5 feedback: Great server
+reply ephemerally: Sent the pages
+server sent: [secondary spage:0:Back (disabled), secondary spage:2:Next] [embed title "Server page 1" description "Page 1 of 3."]
+edit: [embed title "Server page 1" description "Page 1 of 3, edited by the server."] mentions off
+bot saw spage:2
+update: [secondary spage:1:Back, secondary spage:3:Next] [embed title "Server page 2" description "Page 2 of 3."]
+bot saw spage:3
+update: [secondary spage:2:Back, secondary spage:4:Next (disabled)] [embed title "Server page 3" description "Page 3 of 3."]
+reply ephemerally: Working on it
+follow-up ephemerally: Done
+send: Hi <@7> [link https://example.com:Site] mentions on

@@ -16,6 +16,9 @@ import io.github.itsnotethann.skord.discord.DiscordException;
 import io.github.itsnotethann.skord.discord.DiscordRef;
 import io.github.itsnotethann.skord.discord.FetchProperty;
 import io.github.itsnotethann.skord.discord.GuildRef;
+import io.github.itsnotethann.skord.discord.Components;
+import io.github.itsnotethann.skord.discord.Embeds;
+import io.github.itsnotethann.skord.discord.MessageBody;
 import io.github.itsnotethann.skord.discord.MessageRef;
 import io.github.itsnotethann.skord.discord.RefCodec;
 import io.github.itsnotethann.skord.protocol.Frame;
@@ -35,6 +38,8 @@ final class BridgeActions {
 			case "send" -> Scope.SEND;
 			case "reply" -> Scope.REPLY;
 			case "edit" -> Scope.EDIT;
+			case "delete" -> Scope.DELETE;
+			case "fetch-message" -> Scope.READ;
 			case "create-channel" -> Scope.CHANNELS;
 			case "fetch", "gateway-ping" -> Scope.READ;
 			default -> null;
@@ -68,24 +73,53 @@ final class BridgeActions {
 			CompletionStage<Frame.Result> stage = switch (frame.kind()) {
 				case "send" -> {
 					ChannelRef channel = ref(args, "channel", ChannelRef.class);
-					String text = text(args, "text");
-					if (channel == null || text == null)
+					MessageBody body = body(args);
+					if (channel == null || body == null)
 						yield CompletableFuture.completedFuture(invalid(id, "send needs a channel and text"));
-					yield actions.send(channel, text).thenApply(message -> message(id, message));
+					String problem = body.problem();
+					if (problem != null)
+						yield CompletableFuture.completedFuture(invalid(id, problem));
+					yield actions.send(channel, body).thenApply(message -> message(id, message));
 				}
 				case "reply" -> {
 					MessageRef message = ref(args, "message", MessageRef.class);
-					String text = text(args, "text");
-					if (message == null || text == null)
+					MessageBody body = body(args);
+					if (message == null || body == null)
 						yield CompletableFuture.completedFuture(invalid(id, "reply needs a message and text"));
-					yield actions.reply(message, text).thenApply(sent -> message(id, sent));
+					String problem = body.problem();
+					if (problem != null)
+						yield CompletableFuture.completedFuture(invalid(id, problem));
+					yield actions.reply(message, body).thenApply(sent -> message(id, sent));
 				}
 				case "edit" -> {
 					MessageRef message = ref(args, "message", MessageRef.class);
-					String text = text(args, "text");
-					if (message == null || text == null)
+					MessageBody body = body(args);
+					if (message == null || body == null)
 						yield CompletableFuture.completedFuture(invalid(id, "edit needs a message and text"));
-					yield actions.edit(message, text).thenApply(edited -> message(id, edited));
+					String problem = body.problem();
+					if (problem != null)
+						yield CompletableFuture.completedFuture(invalid(id, problem));
+					yield actions.edit(message, body).thenApply(edited -> message(id, edited));
+				}
+				case "delete" -> {
+					MessageRef message = ref(args, "message", MessageRef.class);
+					if (message == null)
+						yield CompletableFuture.completedFuture(invalid(id, "delete needs a message"));
+					yield actions.delete(message).thenApply(done -> new Frame.Result(id, true, Long.toString(message.id()), null));
+				}
+				case "fetch-message" -> {
+					ChannelRef channel = ref(args, "channel", ChannelRef.class);
+					String messageId = text(args, "id");
+					long parsed;
+					try {
+						parsed = messageId == null ? -1 : Long.parseLong(messageId);
+					} catch (NumberFormatException e) {
+						parsed = -1;
+					}
+					if (channel == null || parsed < 0)
+						yield CompletableFuture.completedFuture(invalid(id, "fetch-message needs a channel and a message id"));
+					yield actions.fetchMessage(channel, parsed).thenApply(found ->
+						new Frame.Result(id, true, Long.toString(found.id()), null, RefCodec.toJson(found)));
 				}
 				case "create-channel" -> {
 					String name = text(args, "name");
@@ -121,6 +155,19 @@ final class BridgeActions {
 		} catch (DiscordException | IllegalArgumentException e) {
 			return CompletableFuture.failedFuture(e);
 		}
+	}
+
+	/**
+	 * The message an action carries: its text, and embeds and components when the action has them (absent leaves a
+	 * message's as they are). Null without text. An older server sends no {@code mentions}, so its mentions don't ping.
+	 */
+	private static @Nullable MessageBody body(JsonObject args) {
+		String text = text(args, "text");
+		if (text == null)
+			return null;
+		JsonElement mentions = args.get("mentions");
+		return new MessageBody(text, Embeds.fromJson(args.get("embeds")), Components.fromJson(args.get("components")),
+			mentions != null && mentions.isJsonPrimitive() && mentions.getAsBoolean());
 	}
 
 	private static Frame.Result message(String id, MessageRef message) {

@@ -1,0 +1,21 @@
+reply: Read the rules, then click: [success verify:I agree, danger shop:no:Decline (disabled)]
+any click
+verify clicked, id verify
+update: Verified. [no components]
+any click
+shop click, id shop:2
+update: Bought. [secondary shop:again:Again]
+any click
+any click
+silent handler
+defer update
+sent: Ready? [primary wait:yes:Yes, link https://example.com/rules:Rules]
+any click
+cart parts: add and 42
+defer update
+any click
+defer update
+any click
+defer update
+waited click: wait:yes
+no click in time, nothing stored

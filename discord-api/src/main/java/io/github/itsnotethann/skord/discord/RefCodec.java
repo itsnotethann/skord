@@ -38,6 +38,10 @@ public final class RefCodec {
 					out.addProperty("content", message.content());
 				if (message.display() != null)
 					out.addProperty("display", message.display());
+				if (message.author() != null)
+					out.add("author", toJson(message.author()));
+				if (message.embeds() != null)
+					out.add("embeds", Embeds.toJson(message.embeds()));
 			}
 		}
 		return out;
@@ -70,7 +74,8 @@ public final class RefCodec {
 			case "role" -> new RoleRef(id, name);
 			case "message" -> {
 				Long channel = number(object, "channel");
-				yield channel == null ? null : new MessageRef(id, channel, text(object, "content"), text(object, "display"));
+				yield channel == null ? null : new MessageRef(id, channel, text(object, "content"), text(object, "display"),
+					fromJson(object.get("author")) instanceof UserRef author ? author : null, Embeds.fromJson(object.get("embeds")));
 			}
 			default -> null;
 		};
