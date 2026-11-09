@@ -355,7 +355,20 @@ server still loads. Embedded mode is Minestom only for now.
 
 ### Java API
 
-Servers that run no Skript build on three thin jars: `protocol`, `discord-api` and `bridge-api`.
+Servers that run no Skript build on three thin jars: `protocol`, `discord-api` and `bridge-api`,
+published through [JitPack](https://jitpack.io/#itsnotethann/skord):
+
+```kotlin
+repositories {
+	maven("https://jitpack.io")
+}
+
+dependencies {
+	implementation("com.github.itsnotethann.skord:bridge-api:<tag or commit>")
+}
+```
+
+They need Java 21 and pull in only Gson.
 `Bridge.start(config, platform)` connects. From there a plugin declares commands with handlers,
 subscribes to events, declares and calls shared functions, sends Discord actions, reports players
 joining and leaving, and listens for the connection going up or down. `BridgeConfig.withMeta` adds

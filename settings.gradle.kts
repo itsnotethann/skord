@@ -3,11 +3,14 @@ plugins {
 }
 
 rootProject.name = "skord"
-include("core", "jda", "embedded", "protocol", "bridge-api", "discord-api", "syntax", "bridge-minestom", "bridge-paper", "testbot")
 
-// A sibling uncommon checkout substitutes the engine from source, so engine changes need no publish.
-// Without one, the JitPack coordinates in core/build.gradle.kts resolve normally.
-if (file("../uncommon/settings.gradle.kts").exists())
-	includeBuild("../uncommon")
-else if (file("uncommon/settings.gradle.kts").exists())
-	includeBuild("uncommon")
+if (System.getenv("JITPACK") == "true") {
+	include("protocol", "discord-api", "bridge-api")
+} else {
+	include("core", "jda", "embedded", "protocol", "bridge-api", "discord-api", "syntax", "bridge-minestom", "bridge-paper", "testbot")
+
+	if (file("../uncommon/settings.gradle.kts").exists())
+		includeBuild("../uncommon")
+	else if (file("uncommon/settings.gradle.kts").exists())
+		includeBuild("uncommon")
+}
